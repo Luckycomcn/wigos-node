@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { WIGOS_ID_PATTERN, isValidWmdrRecord, buildWmdrRecord } from "../wmdr";
-import { submitGeoJson } from "../api";
+import { submitGeoJson, getCodelist } from "../api";
 import StringListField from "./StringListField";
 import MapPreview from "./MapPreview";
 
@@ -27,6 +27,13 @@ const initialState = {
 export default function WmdrForm() {
   const [form, setForm] = useState(initialState);
   const [submitState, setSubmitState] = useState({ status: "idle" });
+  const [facilityTypes, setFacilityTypes] = useState([]);
+  const [wmoRegions, setWmoRegions] = useState([]);
+
+  useEffect(() => {
+    getCodelist("FacilityType").then(setFacilityTypes).catch(() => setFacilityTypes([]));
+    getCodelist("WMORegion").then(setWmoRegions).catch(() => setWmoRegions([]));
+  }, []);
 
   const set = (field) => (value) => setForm((prev) => ({ ...prev, [field]: value }));
   const setInput = (field) => (e) => set(field)(e.target.value);
@@ -116,11 +123,25 @@ export default function WmdrForm() {
           <div className="row">
             <div className="field">
               <label>Facility type</label>
-              <input className="field-input" value={form.facilityType} onChange={setInput("facilityType")} />
+              <select className="field-input" value={form.facilityType} onChange={setInput("facilityType")}>
+                <option value="">None selected</option>
+                {facilityTypes.map((opt) => (
+                  <option key={opt.code} value={opt.code}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="field">
               <label>WMO region</label>
-              <input className="field-input" value={form.wmoRegion} onChange={setInput("wmoRegion")} />
+              <select className="field-input" value={form.wmoRegion} onChange={setInput("wmoRegion")}>
+                <option value="">None selected</option>
+                {wmoRegions.map((opt) => (
+                  <option key={opt.code} value={opt.code}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
