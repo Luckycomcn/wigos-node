@@ -18,6 +18,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "corsheaders",
+    "django.contrib.postgres",
     "api",
 ]
 
@@ -55,7 +56,7 @@ ASGI_APPLICATION = "config.asgi.application"
 
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.postgresql",
+        "ENGINE": "django.contrib.gis.db.backends.postgis",
         "NAME": os.environ.get("POSTGRES_DB", "app_db"),
         "USER": os.environ.get("POSTGRES_USER", "app_user"),
         "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "app_password"),

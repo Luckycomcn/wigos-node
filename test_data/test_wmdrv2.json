@@ -1,0 +1,43 @@
+{
+    "id": "0-20000-0-12345",
+    "conformsTo": [
+        "http://wigos.wmo.int/spec/wmdr/2/conf/core"
+    ],
+    "type": "Feature",
+    "geometry": {
+        "type": "Point",
+        "coordinates": [
+            -23,
+            22
+        ]
+    },
+    "properties": {
+        "title": "Test",
+        "contacts": [
+            {
+                "organization": "WMO"
+            }
+        ],
+        "created": "2026-08-07T11:13:00.000Z",
+        "observingCapabilities": [
+            {
+                "name": "Yes"
+            }
+        ],
+        "description": "Test",
+        "additionalTitles": [
+            "Test"
+        ],
+        "facilityType": "landFixed",
+        "wmoRegion": "africa",
+        "updated": "2026-08-07T11:13:00.000Z",
+        "keywords": [
+            "temperature, precipitation, test"
+        ]
+    },
+    "links": [
+        {
+            "href": "http://test.com"
+        }
+    ]
+}
