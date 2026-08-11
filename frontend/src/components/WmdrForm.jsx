@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { WIGOS_ID_PATTERN, isValidWmdrRecord, buildWmdrRecord } from "../wmdr";
 import { submitGeoJson, getCodelist } from "../api";
 import StringListField from "./StringListField";
+import ContactsField from "./ContactsField";
 import MapPreview from "./MapPreview";
 
 const initialState = {
@@ -14,7 +15,7 @@ const initialState = {
   additionalIds: [""],
   facilityType: "",
   wmoRegion: "",
-  contacts: [""],
+  contacts: [],
   created: "",
   updated: "",
   keywords: [""],
@@ -145,7 +146,7 @@ export default function WmdrForm() {
             </div>
           </div>
 
-          <StringListField label="Contacts (organization)" values={form.contacts} onChange={set("contacts")} required />
+          <ContactsField value={form.contacts} onChange={set("contacts")} />
 
           <div className="row">
             <div className="field">
