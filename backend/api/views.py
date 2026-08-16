@@ -38,6 +38,12 @@ def geojson(request):
     return Response({"received": body}, status=201)
 
 
+@api_view(["GET"])
+def my_stations(request):
+    my_stations = Station.objects.filter(wmdrv2__isnull=False) # return all stations in the meantime
+    return Response([{"wsi": station.wigos_identifier, "name": station.name} for station in my_stations])
+
+
 class Wmdrv2View(APIView):
     # DRF automatically runs this before get() or post()
     def initial(self, request, *args, **kwargs):
