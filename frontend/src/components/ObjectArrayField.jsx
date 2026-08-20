@@ -1,7 +1,10 @@
 import StringListField from "./StringListField";
 
+const INPUT_TYPES = ["text", "date", "datetime-local"];
+
 function emptyValueForField(field) {
-  if (field.type === "text") return "";
+  if (INPUT_TYPES.includes(field.type)) return "";
+  if (field.type === "object") return emptyItem(field.fields);
   return [];
 }
 
@@ -13,7 +16,7 @@ export function ObjectArrayItemRow({ item, fields, onChange, path, onDrillInto }
   return (
     <>
       {fields.map((field) => {
-        if (field.type === "text") {
+        if (INPUT_TYPES.includes(field.type)) {
           return (
             <div className="field" key={field.name}>
               <label>
@@ -21,6 +24,7 @@ export function ObjectArrayItemRow({ item, fields, onChange, path, onDrillInto }
               </label>
               <input
                 className="field-input"
+                type={field.type}
                 value={item[field.name] || ""}
                 placeholder={field.placeholder}
                 onChange={(e) => onChange({ ...item, [field.name]: e.target.value })}
@@ -38,6 +42,22 @@ export function ObjectArrayItemRow({ item, fields, onChange, path, onDrillInto }
             />
           );
         }
+        if (field.type === "object") {
+          return (
+            <div className="nested-card" key={field.name}>
+              <div className="nested-card-header">
+                <span>{field.label}</span>
+              </div>
+              <ObjectArrayItemRow
+                item={item[field.name] || {}}
+                fields={field.fields}
+                onChange={(next) => onChange({ ...item, [field.name]: next })}
+                path={[...path, field.name]}
+                onDrillInto={onDrillInto}
+              />
+            </div>
+          );
+        }
         return (
           <ObjectArrayField
             key={field.name}
@@ -50,6 +70,7 @@ export function ObjectArrayItemRow({ item, fields, onChange, path, onDrillInto }
             mode="summary"
             path={[...path, field.name]}
             onDrillInto={onDrillInto}
+            maxItems={field.maxItems}
           />
         );
       })}
@@ -68,10 +89,12 @@ export default function ObjectArrayField({
   path,
   onDrillInto,
   required,
+  maxItems,
 }) {
   const update = (index, next) => onChange(values.map((v, i) => (i === index ? next : v)));
   const add = () => onChange([...values, emptyItem(fields)]);
   const remove = (index) => onChange(values.filter((_, i) => i !== index));
+  const atMax = maxItems != null && values.length >= maxItems;
 
   return (
     <div className="list-field">
@@ -119,9 +142,11 @@ export default function ObjectArrayField({
             </div>
           ))}
 
-      <button type="button" className="btn btn-secondary" onClick={add}>
-        + Add {itemLabel}
-      </button>
+      {!atMax && (
+        <button type="button" className="btn btn-secondary" onClick={add}>
+          + Add {itemLabel}
+        </button>
+      )}
     </div>
   );
 }

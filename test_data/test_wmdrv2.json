@@ -21,7 +21,18 @@
         "created": "2026-08-07T11:13:00.000Z",
         "observingCapabilities": [
             {
-                "name": "Yes"
+                "observedProperty": "airTemperature",
+                "observingMethod": "automatic",
+                "deployments": [
+                    {
+                        "id": "deployment-1",
+                        "instrument": {
+                            "id": "instrument-1",
+                            "manufacturer": "Vaisala",
+                            "model": "HMP155"
+                        }
+                    }
+                ]
             }
         ],
         "description": "Test",

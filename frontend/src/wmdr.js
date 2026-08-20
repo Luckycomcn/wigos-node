@@ -55,6 +55,96 @@ function cleanContacts(contacts) {
   return (contacts || []).map(cleanContact).filter(Boolean);
 }
 
+function cleanTime(time) {
+  if (!time) return null;
+  const cleaned = {};
+  const date = (time.date || "").trim();
+  if (date) cleaned.date = date;
+  const timestamp = (time.timestamp || "").trim();
+  if (timestamp) cleaned.timestamp = new Date(timestamp).toISOString();
+  const intervalStart = (time.intervalStart || "").trim();
+  const intervalEnd = (time.intervalEnd || "").trim();
+  if (intervalStart && intervalEnd) cleaned.interval = [intervalStart, intervalEnd];
+  const resolution = (time.resolution || "").trim();
+  if (resolution) cleaned.resolution = resolution;
+  return Object.keys(cleaned).length ? cleaned : null;
+}
+
+function cleanGeometry(geometry) {
+  if (!geometry) return null;
+  const latitude = (geometry.latitude ?? "").toString().trim();
+  const longitude = (geometry.longitude ?? "").toString().trim();
+  if (latitude === "" || longitude === "" || Number.isNaN(Number(latitude)) || Number.isNaN(Number(longitude))) {
+    return null;
+  }
+  return { type: "Point", coordinates: [Number(longitude), Number(latitude)] };
+}
+
+function cleanReferenceSurface(referenceSurface) {
+  const type = (referenceSurface.referenceSurface || "").trim();
+  const verticalDistance = (referenceSurface.verticalDistance ?? "").toString().trim();
+  if (!type || verticalDistance === "" || Number.isNaN(Number(verticalDistance))) return null;
+  return { referenceSurface: type, verticalDistance: Number(verticalDistance) };
+}
+
+function cleanReferenceSurfaces(referenceSurfaces) {
+  return (referenceSurfaces || []).map(cleanReferenceSurface).filter(Boolean);
+}
+
+function cleanInstrument(instrument) {
+  const id = (instrument?.id || "").trim();
+  if (!id) return null;
+  const cleaned = { id };
+  const manufacturer = (instrument.manufacturer || "").trim();
+  if (manufacturer) cleaned.manufacturer = manufacturer;
+  const model = (instrument.model || "").trim();
+  if (model) cleaned.model = model;
+  const serialNumber = (instrument.serialNumber || "").trim();
+  if (serialNumber) cleaned.serialNumber = serialNumber;
+  return cleaned;
+}
+
+function cleanDeployment(deployment) {
+  const instrument = cleanInstrument(deployment.instrument);
+  if (!instrument) return null;
+  const id = (deployment.id || "").trim();
+  if (!id) return null;
+  const cleaned = { id, instrument };
+  const geometry = cleanGeometry(deployment.geometry);
+  if (geometry) cleaned.geometry = geometry;
+  const time = cleanTime(deployment.time);
+  if (time) cleaned.time = time;
+  const keywords = cleanStringArray(deployment.keywords);
+  if (keywords.length) cleaned.keywords = keywords;
+  const referenceSurfaces = cleanReferenceSurfaces(deployment.referenceSurfaces);
+  if (referenceSurfaces.length) cleaned.referenceSurfaces = referenceSurfaces;
+  return cleaned;
+}
+
+function cleanObservingCapability(capability) {
+  const observedProperty = (capability.observedProperty || "").trim();
+  if (!observedProperty) return null;
+  const cleaned = { observedProperty };
+  const observingMethod = (capability.observingMethod || "").trim();
+  if (observingMethod) cleaned.observingMethod = observingMethod;
+  const operatingStatus = (capability.operatingStatus || "").trim();
+  if (operatingStatus) cleaned.operatingStatus = operatingStatus;
+  const sourceOfObservation = (capability.sourceOfObservation || "").trim();
+  if (sourceOfObservation) cleaned.sourceOfObservation = sourceOfObservation;
+  const time = cleanTime(capability.time);
+  if (time) cleaned.time = time;
+  const deployments = (capability.deployments || [])
+    .slice(0, 1)
+    .map(cleanDeployment)
+    .filter(Boolean);
+  if (deployments.length) cleaned.deployments = deployments;
+  return cleaned;
+}
+
+function cleanObservingCapabilities(capabilities) {
+  return (capabilities || []).map(cleanObservingCapability).filter(Boolean);
+}
+
 export function isValidWmdrRecord(form) {
   return (
     WIGOS_ID_PATTERN.test(form.id) &&
@@ -65,7 +155,7 @@ export function isValidWmdrRecord(form) {
     form.title.trim() !== "" &&
     form.created !== "" &&
     cleanContacts(form.contacts).length > 0 &&
-    nonEmpty(form.observingCapabilities).length > 0 &&
+    cleanObservingCapabilities(form.observingCapabilities).length > 0 &&
     nonEmpty(form.links).length > 0
   );
 }
@@ -75,7 +165,7 @@ export function buildWmdrRecord(form) {
     title: form.title.trim(),
     contacts: cleanContacts(form.contacts),
     created: new Date(form.created).toISOString(),
-    observingCapabilities: nonEmpty(form.observingCapabilities).map((name) => ({ name })),
+    observingCapabilities: cleanObservingCapabilities(form.observingCapabilities),
   };
 
   if (form.description.trim()) properties.description = form.description.trim();

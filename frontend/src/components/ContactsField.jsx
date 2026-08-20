@@ -76,9 +76,11 @@ export default function ContactsField({ value, onChange }) {
               path={current.path}
               onDrillInto={push}
             />
-            <button type="button" className="btn btn-secondary" onClick={close}>
-              Done
-            </button>
+            {trail.length <= 1 && (
+              <button type="button" className="btn btn-secondary" onClick={close}>
+                Done
+              </button>
+            )}
           </>
         )}
       </Dialog>

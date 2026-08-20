@@ -3,6 +3,7 @@ import { WIGOS_ID_PATTERN, isValidWmdrRecord, buildWmdrRecord } from "../wmdr";
 import { submitGeoJson, getCodelist } from "../api";
 import StringListField from "./StringListField";
 import ContactsField from "./ContactsField";
+import ObservingCapabilitiesField from "./ObservingCapabilitiesField";
 import MapPreview from "./MapPreview";
 
 const initialState = {
@@ -21,7 +22,7 @@ const initialState = {
   keywords: [""],
   territories: [""],
   programAffiliations: [""],
-  observingCapabilities: [""],
+  observingCapabilities: [],
   links: [""],
 };
 
@@ -168,11 +169,9 @@ export default function WmdrForm() {
             values={form.programAffiliations}
             onChange={set("programAffiliations")}
           />
-          <StringListField
-            label="Observing capabilities"
-            values={form.observingCapabilities}
+          <ObservingCapabilitiesField
+            value={form.observingCapabilities}
             onChange={set("observingCapabilities")}
-            required
           />
         </div>
 
