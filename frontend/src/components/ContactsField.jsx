@@ -1,7 +1,7 @@
 import { useState } from "react";
 import ObjectArrayField, { ObjectArrayItemRow } from "./ObjectArrayField";
 import Dialog from "./Dialog";
-import { getAtPath, setAtPath } from "../formPath";
+import { getAtPath, setAtPath, isFieldsetComplete } from "../formPath";
 
 const PHONE_FIELDS = [
   { name: "value", label: "Phone number", type: "text", placeholder: "+41791234567" },
@@ -77,7 +77,12 @@ export default function ContactsField({ value, onChange }) {
               onDrillInto={push}
             />
             {trail.length <= 1 && (
-              <button type="button" className="btn btn-secondary" onClick={close}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={close}
+                disabled={!isFieldsetComplete(getAtPath(value, current.path) || {}, current.fields)}
+              >
                 Done
               </button>
             )}
