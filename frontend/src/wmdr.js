@@ -160,6 +160,125 @@ export function isValidWmdrRecord(form) {
   );
 }
 
+function toDatetimeLocal(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function parseTime(time) {
+  const [intervalStart, intervalEnd] = (time && time.interval) || ["", ""];
+  return {
+    date: (time && time.date) || "",
+    timestamp: time && time.timestamp ? toDatetimeLocal(time.timestamp) : "",
+    intervalStart: intervalStart || "",
+    intervalEnd: intervalEnd || "",
+    resolution: (time && time.resolution) || "",
+  };
+}
+
+function parsePhoneOrEmail(entry) {
+  return { value: entry.value || "", roles: entry.roles || [] };
+}
+
+function parseAddress(address) {
+  return {
+    city: address.city || "",
+    administrativeArea: address.administrativeArea || "",
+    postalCode: address.postalCode || "",
+    country: address.country || "",
+    deliveryPoint: address.deliveryPoint || [],
+    roles: address.roles || [],
+  };
+}
+
+function parseContact(contact) {
+  return {
+    organization: contact.organization || "",
+    name: contact.name || "",
+    position: contact.position || "",
+    phones: (contact.phones || []).map(parsePhoneOrEmail),
+    emails: (contact.emails || []).map(parsePhoneOrEmail),
+    addresses: (contact.addresses || []).map(parseAddress),
+    roles: contact.roles || [],
+  };
+}
+
+function parseInstrument(instrument) {
+  return {
+    id: (instrument && instrument.id) || "",
+    manufacturer: (instrument && instrument.manufacturer) || "",
+    model: (instrument && instrument.model) || "",
+    serialNumber: (instrument && instrument.serialNumber) || "",
+  };
+}
+
+function parseDeploymentGeometry(geometry) {
+  const coordinates = geometry && geometry.coordinates;
+  if (!coordinates) return { latitude: "", longitude: "" };
+  return { latitude: String(coordinates[1]), longitude: String(coordinates[0]) };
+}
+
+function parseReferenceSurface(referenceSurface) {
+  return {
+    referenceSurface: referenceSurface.referenceSurface || "",
+    verticalDistance:
+      referenceSurface.verticalDistance != null ? String(referenceSurface.verticalDistance) : "",
+  };
+}
+
+function parseDeployment(deployment) {
+  return {
+    id: deployment.id || "",
+    geometry: parseDeploymentGeometry(deployment.geometry),
+    time: parseTime(deployment.time),
+    keywords: deployment.keywords || [],
+    referenceSurfaces: (deployment.referenceSurfaces || []).map(parseReferenceSurface),
+    instrument: parseInstrument(deployment.instrument),
+  };
+}
+
+function parseObservingCapability(capability) {
+  return {
+    observedProperty: capability.observedProperty || "",
+    observingMethod: capability.observingMethod || "",
+    operatingStatus: capability.operatingStatus || "",
+    sourceOfObservation: capability.sourceOfObservation || "",
+    time: parseTime(capability.time),
+    deployments: (capability.deployments || []).map(parseDeployment),
+  };
+}
+
+export function parseWmdrRecord(record) {
+  const properties = record.properties || {};
+  const coordinates = (record.geometry && record.geometry.coordinates) || ["", ""];
+  return {
+    id: record.id || "",
+    latitude: coordinates[1] != null ? String(coordinates[1]) : "",
+    longitude: coordinates[0] != null ? String(coordinates[0]) : "",
+    title: properties.title || "",
+    description: properties.description || "",
+    additionalTitles: properties.additionalTitles?.length ? properties.additionalTitles : [""],
+    additionalIds: properties.additionalIds?.length ? properties.additionalIds : [""],
+    facilityType: properties.facilityType || "",
+    wmoRegion: properties.wmoRegion || "",
+    contacts: (properties.contacts || []).map(parseContact),
+    created: toDatetimeLocal(properties.created),
+    updated: toDatetimeLocal(properties.updated),
+    keywords: properties.keywords?.length ? properties.keywords : [""],
+    territories: properties.territories?.length
+      ? properties.territories.map((t) => t.territory)
+      : [""],
+    programAffiliations: properties.programAffiliations?.length
+      ? properties.programAffiliations.map((p) => p.programAffiliation)
+      : [""],
+    observingCapabilities: (properties.observingCapabilities || []).map(parseObservingCapability),
+    links: record.links?.length ? record.links.map((l) => l.href) : [""],
+  };
+}
+
 export function buildWmdrRecord(form) {
   const properties = {
     title: form.title.trim(),
