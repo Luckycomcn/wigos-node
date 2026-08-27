@@ -41,7 +41,15 @@ def geojson(request):
 @api_view(["GET"])
 def my_stations(request):
     my_stations = Station.objects.filter(wmdrv2__isnull=False) # return all stations in the meantime
-    return Response([{"wsi": station.wigos_identifier, "name": station.name} for station in my_stations])
+    return Response([
+        {
+            "wsi": station.wigos_identifier,
+            "name": station.name,
+            "latitude": station.location.y,
+            "longitude": station.location.x,
+        }
+        for station in my_stations
+    ])
 
 
 class Wmdrv2View(APIView):

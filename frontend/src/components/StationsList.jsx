@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { listMyStations } from "../api";
+import StationsMap from "./StationsMap";
 
 export default function StationsList({ onNew, onEdit }) {
   const [stations, setStations] = useState([]);
@@ -30,28 +31,31 @@ export default function StationsList({ onNew, onEdit }) {
       {loadState.status === "success" && stations.length === 0 && <p>No stations saved yet.</p>}
 
       {stations.length > 0 && (
-        <table className="stations-table">
-          <thead>
-            <tr>
-              <th>WIGOS identifier</th>
-              <th>Name</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {stations.map((station) => (
-              <tr key={station.wsi}>
-                <td>{station.wsi}</td>
-                <td>{station.name}</td>
-                <td>
-                  <button type="button" className="btn btn-secondary" onClick={() => onEdit(station.wsi)}>
-                    Edit
-                  </button>
-                </td>
+        <>
+          <StationsMap stations={stations} />
+          <table className="stations-table">
+            <thead>
+              <tr>
+                <th>WIGOS identifier</th>
+                <th>Name</th>
+                <th></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {stations.map((station) => (
+                <tr key={station.wsi}>
+                  <td>{station.wsi}</td>
+                  <td>{station.name}</td>
+                  <td>
+                    <button type="button" className="btn btn-secondary" onClick={() => onEdit(station.wsi)}>
+                      Edit
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
       )}
     </div>
   );

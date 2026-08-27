@@ -357,6 +357,11 @@ h3 {
   margin-top: 0.6rem;
 }
 
+.stations-map-container {
+  height: 320px;
+  margin-bottom: 1rem;
+}
+
 .btn-link {
   background: none;
   border: none;
