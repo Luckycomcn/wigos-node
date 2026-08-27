@@ -47,6 +47,10 @@ export async function getCodelist(scheme) {
   }
   const text = await res.text();
   return parseCsv(text)
-    .map((row) => ({ code: row["skos:notation"], label: row["rdfs:label"] || row["skos:notation"] }))
+    .map((row) => ({
+      code: row["skos:notation"],
+      label: row["rdfs:label"] || row["skos:notation"],
+      id: (row["@id"] || "").replace(/^<|>$/g, ""),
+    }))
     .filter((entry) => entry.code);
 }

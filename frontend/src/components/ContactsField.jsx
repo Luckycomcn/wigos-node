@@ -55,6 +55,7 @@ export default function ContactsField({ value, onChange }) {
         values={value}
         onChange={onChange}
         fields={CONTACT_FIELDS}
+        itemSummary={(c) => [c.organization, c.name].filter(Boolean).join(" - ")}
         mode="full"
         path={[]}
         onDrillInto={push}

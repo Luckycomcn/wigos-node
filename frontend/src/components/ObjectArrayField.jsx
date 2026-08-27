@@ -4,7 +4,7 @@ import StringListField from "./StringListField";
 const INPUT_TYPES = ["text", "date", "datetime-local"];
 
 function emptyValueForField(field) {
-  if (INPUT_TYPES.includes(field.type)) return "";
+  if (INPUT_TYPES.includes(field.type) || field.type === "select") return "";
   if (field.type === "object") return emptyItem(field.fields);
   if (field.type === "array-object" && field.required) return [emptyItem(field.fields)];
   return [];
@@ -31,6 +31,37 @@ export function ObjectArrayItemRow({ item, fields, onChange, path, onDrillInto }
                 placeholder={field.placeholder}
                 onChange={(e) => onChange({ ...item, [field.name]: e.target.value })}
               />
+            </div>
+          );
+        }
+        if (field.type === "select") {
+          return (
+            <div className="field" key={field.name}>
+              <label>
+                {field.label} {field.required && <span className="required">*</span>}
+              </label>
+              <select
+                className="field-input"
+                value={item[field.name] || ""}
+                onChange={(e) => onChange({ ...item, [field.name]: e.target.value })}
+              >
+                <option value="">None selected</option>
+                {field.groups
+                  ? field.groups.map((group) => (
+                      <optgroup label={group.label} key={group.label}>
+                        {group.options.map((opt) => (
+                          <option key={opt.code} value={opt.code}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))
+                  : (field.options || []).map((opt) => (
+                      <option key={opt.code} value={opt.code}>
+                        {opt.label}
+                      </option>
+                    ))}
+              </select>
             </div>
           );
         }
@@ -93,8 +124,9 @@ export default function ObjectArrayField({
   required,
   maxItems,
 }) {
-  // Only the first item starts expanded; the rest start collapsed.
-  const [collapsed, setCollapsed] = useState(() => new Set(values.map((_, i) => i).slice(1)));
+  // All items start collapsed when the form first loads. Items added later
+  // via "+ Add" are not in this set, so they start expanded for editing.
+  const [collapsed, setCollapsed] = useState(() => new Set(values.map((_, i) => i)));
 
   const update = (index, next) => onChange(values.map((v, i) => (i === index ? next : v)));
   const add = () => onChange([...values, emptyItem(fields)]);
@@ -180,9 +212,7 @@ export default function ObjectArrayField({
                 }}
               >
                 <div className="nested-card-header">
-                  <span>
-                    {itemLabel} {i + 1}
-                  </span>
+                  <span>{(itemSummary && itemSummary(item)) || `${itemLabel} ${i + 1}`}</span>
                   <div className="nested-card-header-actions">
                     <button
                       type="button"

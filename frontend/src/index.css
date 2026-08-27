@@ -148,6 +148,10 @@ h3 {
   flex: 1;
 }
 
+.wigos-id-row > *:first-child {
+  flex: 0 0 3.5rem;
+}
+
 .list-field {
   margin-bottom: 1.25rem;
 }

@@ -1,7 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import ObjectArrayField, { ObjectArrayItemRow } from "./ObjectArrayField";
 import Dialog from "./Dialog";
 import { getAtPath, setAtPath, isFieldsetComplete } from "../formPath";
+import { getCodelist } from "../api";
+
+const OBSERVED_PROPERTY_CODELISTS = [
+  { scheme: "ObservedVariableAtmosphere", label: "Atmosphere" },
+  { scheme: "ObservedVariableOcean", label: "Ocean" },
+  { scheme: "ObservedVariableTerrestrial", label: "Terrestrial" },
+  { scheme: "ObservedVariableOuterSpace", label: "Outer space" },
+];
 
 // Field names/shapes verified against schemas/observingCapability.yaml,
 // deployment.yaml and instrument.yaml in wmo-im/wmdr2 (wigosbox-catalogue1.99-dev),
@@ -47,24 +55,64 @@ const DEPLOYMENT_FIELDS = [
   { name: "instrument", label: "Instrument", type: "object", fields: INSTRUMENT_FIELDS },
 ];
 
-const OBSERVING_CAPABILITY_FIELDS = [
-  { name: "observedProperty", label: "Observed property", type: "text", required: true },
-  { name: "observingMethod", label: "Observing method", type: "text" },
-  { name: "operatingStatus", label: "Operating status", type: "text" },
-  { name: "sourceOfObservation", label: "Source of observation", type: "text" },
-  { name: "time", label: "Time", type: "object", fields: TIME_FIELDS },
-  {
-    name: "deployments",
-    label: "Deployment",
-    type: "array-object",
-    fields: DEPLOYMENT_FIELDS,
-    maxItems: 1,
-    summary: (d) => [d.instrument?.manufacturer, d.instrument?.model].filter(Boolean).join(" ") || d.id,
-  },
-];
+function observingCapabilityFields(observedPropertyGroups) {
+  return [
+    {
+      name: "observedProperty",
+      label: "Observed property",
+      type: "select",
+      required: true,
+      groups: observedPropertyGroups,
+    },
+    { name: "observingMethod", label: "Observing method", type: "text" },
+    { name: "operatingStatus", label: "Operating status", type: "text" },
+    { name: "sourceOfObservation", label: "Source of observation", type: "text" },
+    { name: "time", label: "Time", type: "object", fields: TIME_FIELDS },
+    {
+      name: "deployments",
+      label: "Deployment",
+      type: "array-object",
+      fields: DEPLOYMENT_FIELDS,
+      maxItems: 1,
+      summary: (d) => [d.instrument?.manufacturer, d.instrument?.model].filter(Boolean).join(" ") || d.id,
+    },
+  ];
+}
 
 export default function ObservingCapabilitiesField({ value, onChange }) {
   const [trail, setTrail] = useState([]);
+  const [observedPropertyGroups, setObservedPropertyGroups] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all(
+      OBSERVED_PROPERTY_CODELISTS.map(({ scheme, label }) =>
+        getCodelist(scheme)
+          .then((options) => ({
+            label,
+            // Use the concept URI (not skos:notation) as the option value:
+            // notations are only unique within a single domain, and a
+            // handful of codes collide across domains (e.g. "12244" is
+            // both an atmosphere and an ocean variable).
+            options: options
+              .map((opt) => ({ code: opt.id, label: opt.label }))
+              .sort((a, b) => a.label.localeCompare(b.label)),
+          }))
+          .catch(() => ({ label, options: [] }))
+      )
+    ).then((groups) => {
+      if (!cancelled) setObservedPropertyGroups(groups);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const fields = observingCapabilityFields(observedPropertyGroups);
+
+  const observedPropertyLabels = Object.fromEntries(
+    observedPropertyGroups.flatMap((group) => group.options.map((opt) => [opt.code, opt.label]))
+  );
 
   const push = (path, label, fields) => setTrail((prev) => [...prev, { path, label, fields }]);
   const back = () => setTrail((prev) => prev.slice(0, -1));
@@ -79,7 +127,8 @@ export default function ObservingCapabilitiesField({ value, onChange }) {
         itemLabel="Observing capability"
         values={value}
         onChange={onChange}
-        fields={OBSERVING_CAPABILITY_FIELDS}
+        fields={fields}
+        itemSummary={(c) => observedPropertyLabels[c.observedProperty] || c.observedProperty}
         mode="full"
         path={[]}
         onDrillInto={push}

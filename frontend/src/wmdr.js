@@ -1,6 +1,17 @@
 export const WIGOS_ID_PATTERN = /^(0|1|2|3)-([1-9]\d*)-([0-9]+)-([A-Za-z0-9._-]+)$/;
 export const CONFORMANCE_CLASS = "http://wigos.wmo.int/spec/wmdr/2/conf/core";
 
+// A WIGOS ID is scheme-issuer-issue-local. The local part may itself
+// contain hyphens, so only the first three separators are split on.
+export function splitWigosId(id) {
+  const [scheme = "0", issuer = "", issue = "", ...rest] = (id || "").split("-");
+  return { scheme: scheme || "0", issuer, issue, local: rest.join("-") };
+}
+
+export function joinWigosId({ scheme, issuer, issue, local }) {
+  return [scheme || "0", issuer, issue, local].join("-");
+}
+
 const nonEmpty = (arr) => arr.map((v) => v.trim()).filter(Boolean);
 
 function cleanStringArray(arr) {
@@ -152,6 +163,7 @@ export function isValidWmdrRecord(form) {
     form.longitude !== "" &&
     !Number.isNaN(Number(form.latitude)) &&
     !Number.isNaN(Number(form.longitude)) &&
+    (form.height === "" || !Number.isNaN(Number(form.height))) &&
     form.title.trim() !== "" &&
     form.created !== "" &&
     cleanContacts(form.contacts).length > 0 &&
@@ -258,6 +270,7 @@ export function parseWmdrRecord(record) {
     id: record.id || "",
     latitude: coordinates[1] != null ? String(coordinates[1]) : "",
     longitude: coordinates[0] != null ? String(coordinates[0]) : "",
+    height: coordinates[2] != null ? String(coordinates[2]) : "",
     title: properties.title || "",
     description: properties.description || "",
     additionalTitles: properties.additionalTitles?.length ? properties.additionalTitles : [""],
@@ -303,13 +316,17 @@ export function buildWmdrRecord(form) {
     }));
   }
 
+  const coordinates = [Number(form.longitude), Number(form.latitude)];
+  const height = (form.height ?? "").toString().trim();
+  if (height !== "" && !Number.isNaN(Number(height))) coordinates.push(Number(height));
+
   return {
     id: form.id.trim(),
     conformsTo: [CONFORMANCE_CLASS],
     type: "Feature",
     geometry: {
       type: "Point",
-      coordinates: [Number(form.longitude), Number(form.latitude)],
+      coordinates,
     },
     properties,
     links: nonEmpty(form.links).map((href) => ({ href })),

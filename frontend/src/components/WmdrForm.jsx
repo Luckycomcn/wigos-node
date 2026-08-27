@@ -1,6 +1,14 @@
 import { useEffect, useState } from "react";
-import { WIGOS_ID_PATTERN, isValidWmdrRecord, buildWmdrRecord, parseWmdrRecord } from "../wmdr";
+import {
+  WIGOS_ID_PATTERN,
+  isValidWmdrRecord,
+  buildWmdrRecord,
+  parseWmdrRecord,
+  splitWigosId,
+  joinWigosId,
+} from "../wmdr";
 import { saveStation, getStation, getCodelist } from "../api";
+import { ISO_3166_COUNTRIES } from "../iso3166";
 import StringListField from "./StringListField";
 import ContactsField from "./ContactsField";
 import ObservingCapabilitiesField from "./ObservingCapabilitiesField";
@@ -10,6 +18,7 @@ const initialState = {
   id: "",
   latitude: "",
   longitude: "",
+  height: "",
   title: "",
   description: "",
   additionalTitles: [""],
@@ -52,6 +61,9 @@ export default function WmdrForm({ wigosIdentifier, onSaved, onCancel }) {
 
   const set = (field) => (value) => setForm((prev) => ({ ...prev, [field]: value }));
   const setInput = (field) => (e) => set(field)(e.target.value);
+
+  const idParts = splitWigosId(form.id);
+  const setIdPart = (part) => (e) => set("id")(joinWigosId({ ...idParts, [part]: e.target.value }));
 
   const idValid = form.id === "" || WIGOS_ID_PATTERN.test(form.id);
   const valid = isValidWmdrRecord(form);
@@ -105,16 +117,49 @@ export default function WmdrForm({ wigosIdentifier, onSaved, onCancel }) {
               <label>
                 WIGOS station identifier <span className="required">*</span>
               </label>
-              <input
-                className="field-input"
-                value={form.id}
-                onChange={setInput("id")}
-                placeholder="0-20000-0-12345"
-                disabled={isEditing}
-              />
+              <div className="row wigos-id-row">
+                <input
+                  className="field-input"
+                  value={idParts.scheme}
+                  disabled
+                  aria-label="Identifier scheme"
+                  title="Identifier scheme (always 0 for a WIGOS station identifier)"
+                />
+                <select
+                  className="field-input"
+                  value={idParts.issuer}
+                  onChange={setIdPart("issuer")}
+                  disabled={isEditing}
+                  aria-label="Country code"
+                >
+                  <option value="">Select a country</option>
+                  {ISO_3166_COUNTRIES.map((country) => (
+                    <option key={country.code} value={String(Number(country.code))}>
+                      {country.code} — {country.name}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  className="field-input"
+                  value={idParts.issue}
+                  onChange={setIdPart("issue")}
+                  placeholder="Issue number"
+                  disabled={isEditing}
+                  aria-label="Issue number"
+                />
+                <input
+                  className="field-input"
+                  value={idParts.local}
+                  onChange={setIdPart("local")}
+                  placeholder="Local identifier"
+                  disabled={isEditing}
+                  aria-label="Local identifier"
+                />
+              </div>
               {!idValid && (
                 <div className="field-error">
-                  Must match 0|1|2|3-issuer-issue-local (e.g. 0-20000-0-12345)
+                  Select a country, and enter a numeric issue number and a local identifier
+                  (letters, numbers, &quot;.&quot;, &quot;_&quot; or &quot;-&quot;).
                 </div>
               )}
             </div>
@@ -142,6 +187,17 @@ export default function WmdrForm({ wigosIdentifier, onSaved, onCancel }) {
                   step="any"
                   value={form.longitude}
                   onChange={setInput("longitude")}
+                />
+              </div>
+              <div className="field">
+                <label>Height (m)</label>
+                <input
+                  className="field-input"
+                  type="number"
+                  step="any"
+                  value={form.height}
+                  onChange={setInput("height")}
+                  placeholder="Above sea level"
                 />
               </div>
             </div>
