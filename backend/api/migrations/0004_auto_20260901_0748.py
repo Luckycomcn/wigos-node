@@ -1,19 +1,20 @@
 from django.db import migrations
 
-wmo_members = ['Switzerland','Germany', 'France'] # for testing
+
+wmo_members = [('Switzerland', 0), ('Germany', 1), ('France', 2)] # for testing
 
 name_template = 'nfps_{}'  # Template for group names
 
 def create_custom_groups(apps, schema_editor):
     # Use apps.get_model to avoid importing models directly
-    Group = apps.get_model('auth', 'Group')
+    #Group = apps.get_model('auth', 'Group')
+    WIGOSNodeGroup = apps.get_model('api', 'WIGOSNodeGroup')
     Permission = apps.get_model('auth', 'Permission')
 
-
-    for member in wmo_members:
+    for (member_name, issuer_identifier) in wmo_members:
 
         # Create the group
-        manager_group, created = Group.objects.get_or_create(name=name_template.format(member))
+        manager_group, created = WIGOSNodeGroup.objects.get_or_create(name=name_template.format(member_name), issuer_identifier=issuer_identifier)
         
         # Find and assign specific permissions
         try:
@@ -26,9 +27,9 @@ def create_custom_groups(apps, schema_editor):
             pass
 
 def remove_custom_groups(apps, schema_editor):
-    Group = apps.get_model('auth', 'Group')
-    for member in wmo_members:
-        Group.objects.filter(name=name_template.format(member)).delete()
+    WIGOSNodeGroup = apps.get_model('api', 'WIGOSNodeGroup')
+    for (member_name, issuer_identifier) in wmo_members:
+        WIGOSNodeGroup.objects.filter(name=name_template.format(member_name), issuer_identifier=issuer_identifier).delete()
 
 class Migration(migrations.Migration):
 

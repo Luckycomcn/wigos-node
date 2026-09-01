@@ -14,7 +14,6 @@ from rest_framework.views import APIView
 from .models import Station
 
 
-<<<<<<< HEAD
 class ReadOnly(BasePermission):
     def has_permission(self, request, view):
         return request.method in SAFE_METHODS
@@ -22,8 +21,6 @@ class ReadOnly(BasePermission):
 def check_wigos_identifier(wigos_identifier):
     return not (wigos_identifier is None or not re.match(r'^(0|1|2|3)-([1-9][0-9]*)-([0-9]+)-([A-Za-z0-9]+)$', wigos_identifier))
 
-=======
->>>>>>> 82ded947b7aaad1add3acdedf7e4fb7cef764d36
 @api_view(["GET"])
 def health(request):
     return Response({"status": "ok"})
@@ -54,11 +51,7 @@ def my_stations(request):
     my_stations = Station.objects.filter(wmdrv2__isnull=False) # return all stations in the meantime
     return Response([
         {
-<<<<<<< HEAD
             "station_id": station.id,
-=======
-            "id": station.id,
->>>>>>> 82ded947b7aaad1add3acdedf7e4fb7cef764d36
             "wsi": station.wigos_identifier,
             "name": station.name,
             "latitude": station.location.y,
@@ -69,16 +62,15 @@ def my_stations(request):
 
 
 class Wmdrv2View(APIView):
-<<<<<<< HEAD
     permission_classes = [IsAuthenticated | ReadOnly]
 
     # DRF automatically runs this before get() or post()
-    def initial(self, request, *args, **kwargs):
-        super().initial(request, *args, **kwargs)
-        wigos_identifier = kwargs.get('wigos_identifier')
-        if not check_wigos_identifier(wigos_identifier):
-            from rest_framework.exceptions import ValidationError
-            raise ValidationError(f"Invalid WIGOS identifier: '{wigos_identifier}'")
+    # def initial(self, request, *args, **kwargs):
+    #     super().initial(request, *args, **kwargs)
+    #     wigos_identifier = kwargs.get('wigos_identifier')
+    #     if not check_wigos_identifier(wigos_identifier):
+    #         from rest_framework.exceptions import ValidationError
+    #         raise ValidationError(f"Invalid WIGOS identifier: '{wigos_identifier}'")
 
     def get(self, request, station_id=None):
 
@@ -92,19 +84,9 @@ class Wmdrv2View(APIView):
             station = Station.objects.get(id=station_id)
         except Station.DoesNotExist:
             return Response({"detail": f"Station {station_id} not found"}, status=404)
-=======
-    def get(self, request, pk=None):
-        if pk is None:
-            return Response({"detail": "A station id is required"}, status=400)
-        try:
-            station = Station.objects.get(pk=pk)
-        except Station.DoesNotExist:
-            return Response({"detail": f"Station {pk} not found"}, status=404)
->>>>>>> 82ded947b7aaad1add3acdedf7e4fb7cef764d36
 
         return Response(station.wmdrv2)
 
-<<<<<<< HEAD
     def put(self, request, station_id=None):
 
         if station_id is None:
@@ -151,24 +133,3 @@ class Wmdrv2View(APIView):
             return Response({"detail": str(e)}, status=400)
 
         return Response({"message": f"Station {station.id} created successfully.", "station_id": station.id}, status=201)
-=======
-    def post(self, request, pk=None):
-        if pk is None:
-            station = Station(wmdrv2=request.data)
-        else:
-            try:
-                station = Station.objects.get(pk=pk)
-            except Station.DoesNotExist:
-                return Response({"detail": f"Station {pk} not found"}, status=404)
-            station.wmdrv2 = request.data # we only need to set the wmdrv2 field, the save method will handle updating index fields
-
-        try:
-            station.save()
-        except ValueError as exc:
-            return Response({"detail": str(exc)}, status=400)
-
-        return Response(
-            {"id": station.id, "message": f"WMDR data for station {station.id} saved successfully."},
-            status=201 if pk is None else 200,
-        )
->>>>>>> 82ded947b7aaad1add3acdedf7e4fb7cef764d36

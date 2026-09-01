@@ -1,5 +1,5 @@
 from config import settings
-from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.models import AbstractUser, Group
 from django.contrib.gis.db import models as gis_models
 from django.contrib.gis.geos import Point
 from django.db import models
@@ -10,6 +10,17 @@ json_update_dict = {
 }
 location_expression = parse('$.geometry.coordinates')
 wigos_identifier_expression = parse('$.id')
+additional_wigos_identifier_expression = parse('$.properties.additionalIds')
+
+class WIGOSNodeGroup(models.Model):
+
+    # Establish the direct link to Django's Group
+    group = models.OneToOneField(Group, on_delete=models.CASCADE, related_name='profile')
+
+    issuer_identifier = models.IntegerField()
+
+    def __str__(self):
+        return f"{self.name} (Issuer ID: {self.issuer_identifier})"
 
 class WIGOSNodeUser(AbstractUser):
     # 1. Require a unique email address
@@ -39,6 +50,11 @@ class Station(models.Model):
             wsi = wigos_identifier_expression.find(self.wmdrv2)
             if wsi and len(wsi) > 0:
                 wsis.append(wsi[0].value)
+
+            for additional_wsi in additional_wigos_identifier_expression.find(self.wmdrv2):
+                if additional_wsi and len(additional_wsi) > 0:
+                    wsis.append(additional_wsi[0].value)
+
         return wsis
 
     def save(self, *args, **kwargs):

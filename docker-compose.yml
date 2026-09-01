@@ -7,6 +7,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-app_db}
       POSTGRES_USER: ${POSTGRES_USER:-app_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app_password}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
     volumes:
       - db_data:/var/lib/postgresql/data
     ports:
@@ -20,10 +21,14 @@ services:
   backend:
     build: ./backend
     restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-app_db}
+      - POSTGRES_USER=${POSTGRES_USER:-app_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-app_password}
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
     env_file:
       - .env
-    environment:
-      POSTGRES_HOST: db
     volumes:
       - ./backend:/app
     ports:
