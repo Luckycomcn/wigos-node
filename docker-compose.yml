@@ -31,6 +31,7 @@ services:
       - .env
     volumes:
       - ./backend:/app
+      - ./test_data:/test_data
     ports:
       - "8000:8000"
     depends_on:

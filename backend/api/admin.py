@@ -1,17 +1,18 @@
 # users/admin.py
 from django.contrib import admin
-from django.contrib.auth.admin import UserAdmin
+from django.contrib.auth.admin import GroupAdmin
+from django.contrib.auth.models import Group
+from .models import WIGOSNodeGroup
 
-from .models import WIGOSNodeUser
 
+# Define the inline layout for your extra fields
+class WIGOSNodeGroupProfileInline(admin.StackedInline):
+    model = WIGOSNodeGroup
+    can_delete = False
+    issuer_identifier = 'Extra Group Information'
 
-class WIGOSNodeUserAdmin(UserAdmin):
-    # Order fields displayed in the admin list view
-    list_display = ('email', 'username', 'is_staff', 'is_active')
-    # Filter users based on staff or active status
-    list_filter = ('is_staff', 'is_active')
-    # Order items in the admin view by email
-    ordering = ('email',)
+admin.site.unregister(Group)
 
-# # Register the model and the admin class together
-admin.site.register(WIGOSNodeUser, WIGOSNodeUserAdmin)
+@admin.register(Group)
+class CustomGroupAdmin(GroupAdmin):
+    inlines = [WIGOSNodeGroupProfileInline]
