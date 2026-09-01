@@ -15,13 +15,13 @@ export default function App() {
         {view.mode === "list" && (
           <StationsList
             onNew={() => setView({ mode: "new" })}
-            onEdit={(wsi) => setView({ mode: "edit", wsi })}
+            onEdit={(id) => setView({ mode: "edit", id })}
           />
         )}
         {view.mode !== "list" && (
           <WmdrForm
-            key={view.mode === "edit" ? view.wsi : "new"}
-            wigosIdentifier={view.mode === "edit" ? view.wsi : null}
+            key={view.mode === "edit" ? view.id : "new"}
+            stationId={view.mode === "edit" ? view.id : null}
             onSaved={() => setView({ mode: "list" })}
             onCancel={() => setView({ mode: "list" })}
           />

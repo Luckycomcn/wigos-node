@@ -34,8 +34,8 @@ const initialState = {
   links: [""],
 };
 
-export default function WmdrForm({ wigosIdentifier, onSaved, onCancel }) {
-  const isEditing = !!wigosIdentifier;
+export default function WmdrForm({ stationId, onSaved, onCancel }) {
+  const isEditing = stationId != null;
   const [form, setForm] = useState(initialState);
   const [submitState, setSubmitState] = useState({ status: "idle" });
   const [loadState, setLoadState] = useState({ status: isEditing ? "loading" : "idle" });
@@ -52,13 +52,13 @@ export default function WmdrForm({ wigosIdentifier, onSaved, onCancel }) {
   useEffect(() => {
     if (!isEditing) return;
     setLoadState({ status: "loading" });
-    getStation(wigosIdentifier)
+    getStation(stationId)
       .then((record) => {
         setForm(parseWmdrRecord(record));
         setLoadState({ status: "success" });
       })
       .catch((err) => setLoadState({ status: "error", error: err.message }));
-  }, [isEditing, wigosIdentifier]);
+  }, [isEditing, stationId]);
 
   const set = (field) => (value) => setForm((prev) => ({ ...prev, [field]: value }));
   const setInput = (field) => (e) => set(field)(e.target.value);
@@ -75,9 +75,9 @@ export default function WmdrForm({ wigosIdentifier, onSaved, onCancel }) {
     if (!record) return;
     setSubmitState({ status: "loading" });
     try {
-      const data = await saveStation(form.id, record);
+      const data = await saveStation(stationId, record);
       setSubmitState({ status: "success", data });
-      onSaved?.(form.id);
+      onSaved?.(data.id);
     } catch (err) {
       setSubmitState({ status: "error", error: err.message });
     }
@@ -93,7 +93,7 @@ export default function WmdrForm({ wigosIdentifier, onSaved, onCancel }) {
     return (
       <div className="card">
         {backLink}
-        <p>Loading station {wigosIdentifier}...</p>
+        <p>Loading station...</p>
       </div>
     );
   }

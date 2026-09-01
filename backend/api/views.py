@@ -1,4 +1,3 @@
-import re
 from pathlib import Path
 
 from django.conf import settings
@@ -9,9 +8,6 @@ from rest_framework.views import APIView
 
 from .models import Station
 
-
-def check_wigos_identifier(wigos_identifier):
-    return not (wigos_identifier is None or not re.match(r'^(0|1|2|3)-([1-9][0-9]*)-([0-9]+)-([A-Za-z0-9]+)$', wigos_identifier))
 
 @api_view(["GET"])
 def health(request):
@@ -43,6 +39,7 @@ def my_stations(request):
     my_stations = Station.objects.filter(wmdrv2__isnull=False) # return all stations in the meantime
     return Response([
         {
+            "id": station.id,
             "wsi": station.wigos_identifier,
             "name": station.name,
             "latitude": station.location.y,
@@ -53,31 +50,32 @@ def my_stations(request):
 
 
 class Wmdrv2View(APIView):
-    # DRF automatically runs this before get() or post()
-    def initial(self, request, *args, **kwargs):
-        super().initial(request, *args, **kwargs)
-        wigos_identifier = kwargs.get('wigos_identifier')
-        if not check_wigos_identifier(wigos_identifier):
-            from rest_framework.exceptions import ValidationError
-            raise ValidationError(f"Invalid WIGOS identifier: '{wigos_identifier}'")
-
-    def get(self, request, wigos_identifier):
+    def get(self, request, pk=None):
+        if pk is None:
+            return Response({"detail": "A station id is required"}, status=400)
         try:
-            station = Station.objects.get(wigos_identifier=wigos_identifier)
+            station = Station.objects.get(pk=pk)
         except Station.DoesNotExist:
-            return Response({"detail": f"Station {wigos_identifier} not found"}, status=404)
+            return Response({"detail": f"Station {pk} not found"}, status=404)
 
         return Response(station.wmdrv2)
-        
 
-    def post(self, request, wigos_identifier):
+    def post(self, request, pk=None):
+        if pk is None:
+            station = Station(wmdrv2=request.data)
+        else:
+            try:
+                station = Station.objects.get(pk=pk)
+            except Station.DoesNotExist:
+                return Response({"detail": f"Station {pk} not found"}, status=404)
+            station.wmdrv2 = request.data # we only need to set the wmdrv2 field, the save method will handle updating index fields
+
         try:
-            station = Station.objects.get(wigos_identifier=wigos_identifier)
-        except Station.DoesNotExist:
-            station = Station(wigos_identifier=wigos_identifier)
-        
-        station.wmdrv2 = request.data # we only need to set the wmdrv2 field, the save method will handle updating index fields
-    
-        station.save()
-        
-        return Response({"message": f"WMDv2 data for station {wigos_identifier} updated successfully."}, status=200)
+            station.save()
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+
+        return Response(
+            {"id": station.id, "message": f"WMDR data for station {station.id} saved successfully."},
+            status=201 if pk is None else 200,
+        )
