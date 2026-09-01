@@ -1,5 +1,8 @@
-from django.contrib.gis.db import models
+from config import settings
+from django.contrib.auth.models import AbstractUser
+from django.contrib.gis.db import models as gis_models
 from django.contrib.gis.geos import Point
+from django.db import models
 from jsonpath_ng import parse
 
 json_update_dict = {
@@ -8,12 +11,35 @@ json_update_dict = {
 location_expression = parse('$.geometry.coordinates')
 wigos_identifier_expression = parse('$.id')
 
+class WIGOSNodeUser(AbstractUser):
+    # 1. Require a unique email address
+    email = models.EmailField(unique=True)
+
+    # 2. Tell Django to use email as the login identifier
+    USERNAME_FIELD = 'email'
+
+    # 3. Specify fields prompted for when running 'createsuperuser'
+    REQUIRED_FIELDS = ['username'] 
+
+    def __str__(self):
+        return self.email
+
 class Station(models.Model):
     name = models.CharField(max_length=100, db_index=True)
     wigos_identifier = models.CharField(max_length=100, unique=True, db_index=True)
-    location = models.PointField(srid=4326, null=False, blank=False)
+    location = gis_models.PointField(srid=4326, null=False, blank=False)
     
     wmdrv2 = models.JSONField(null=False, blank=False)
+
+    owner = models.ForeignKey("WIGOSNodeUser", on_delete=models.CASCADE, related_name='stations')
+
+    def get_wigos_identifiers(self):
+        wsis = []
+        if self.wmdrv2:
+            wsi = wigos_identifier_expression.find(self.wmdrv2)
+            if wsi and len(wsi) > 0:
+                wsis.append(wsi[0].value)
+        return wsis
 
     def save(self, *args, **kwargs):
         """override save method to update name and location from wmdrv2 JSON data"""
