@@ -8,7 +8,6 @@ import {
   joinWigosId,
 } from "../wmdr";
 import { saveStation, getStation, getCodelist } from "../api";
-import { ISO_3166_COUNTRIES } from "../iso3166";
 import StringListField from "./StringListField";
 import ContactsField from "./ContactsField";
 import ObservingCapabilitiesField from "./ObservingCapabilitiesField";
@@ -42,10 +41,12 @@ export default function WmdrForm({ wigosIdentifier, onSaved, onCancel }) {
   const [loadState, setLoadState] = useState({ status: isEditing ? "loading" : "idle" });
   const [facilityTypes, setFacilityTypes] = useState([]);
   const [wmoRegions, setWmoRegions] = useState([]);
+  const [issuerCountries, setIssuerCountries] = useState([]);
 
   useEffect(() => {
     getCodelist("FacilityType").then(setFacilityTypes).catch(() => setFacilityTypes([]));
     getCodelist("WMORegion").then(setWmoRegions).catch(() => setWmoRegions([]));
+    getCodelist("ISO3166").then(setIssuerCountries).catch(() => setIssuerCountries([]));
   }, []);
 
   useEffect(() => {
@@ -130,12 +131,12 @@ export default function WmdrForm({ wigosIdentifier, onSaved, onCancel }) {
                   value={idParts.issuer}
                   onChange={setIdPart("issuer")}
                   disabled={isEditing}
-                  aria-label="Country code"
+                  aria-label="Issuer ID"
                 >
                   <option value="">Select a country</option>
-                  {ISO_3166_COUNTRIES.map((country) => (
+                  {issuerCountries.map((country) => (
                     <option key={country.code} value={String(Number(country.code))}>
-                      {country.code} — {country.name}
+                      {country.code} — {country.label}
                     </option>
                   ))}
                 </select>
