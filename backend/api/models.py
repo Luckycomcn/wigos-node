@@ -47,8 +47,10 @@ class Station(models.Model):
         wigos_identifier_value = wigos_identifier_expression.find(self.wmdrv2)
         if not wigos_identifier_value or len(wigos_identifier_value) == 0:
             raise ValueError("Missing required field 'id' in wmdrv2 JSON data")
-        if not self.wigos_identifier == wigos_identifier_value[0].value:
-            raise ValueError(f"WIGOS identifier mismatch: '{self.wigos_identifier}' != '{wigos_identifier_value[0].value}'")
+        self.wigos_identifier = wigos_identifier_value[0].value
+
+        if Station.objects.filter(wigos_identifier=self.wigos_identifier).exclude(pk=self.pk).exists():
+            raise ValueError(f"WIGOS identifier '{self.wigos_identifier}' is already in use")
 
         for key, jsonpath_expression in json_update_dict.items():
             value = jsonpath_expression.find(self.wmdrv2)

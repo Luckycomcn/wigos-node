@@ -43,11 +43,11 @@ export default function StationsList({ onNew, onEdit }) {
             </thead>
             <tbody>
               {stations.map((station) => (
-                <tr key={station.wsi}>
+                <tr key={station.id}>
                   <td>{station.wsi}</td>
                   <td>{station.name}</td>
                   <td>
-                    <button type="button" className="btn btn-secondary" onClick={() => onEdit(station.wsi)}>
+                    <button type="button" className="btn btn-secondary" onClick={() => onEdit(station.id)}>
                       Edit
                     </button>
                   </td>

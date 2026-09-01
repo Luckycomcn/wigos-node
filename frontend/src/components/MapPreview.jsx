@@ -1,11 +1,12 @@
 import { useEffect } from "react";
-import { MapContainer, TileLayer, Marker, AttributionControl, useMap } from "react-leaflet";
-import "../leafletIcons";
+import { MapContainer, TileLayer, Circle, AttributionControl, useMap } from "react-leaflet";
 import { MAPBOX_TILE_URL, MAPBOX_ATTRIBUTION, MAPBOX_TILE_SIZE, MAPBOX_ZOOM_OFFSET } from "../mapConfig";
 
 const DEFAULT_CENTER = [20, 0];
 const DEFAULT_ZOOM = 2;
 const POINT_ZOOM = 9;
+const MARKER_RADIUS_METERS = 5000;
+const MARKER_STYLE = { radius: MARKER_RADIUS_METERS, color: "#1d4ed8", weight: 1, fillColor: "#3b82f6", fillOpacity: 0.9 };
 
 function Recenter({ position }) {
   const map = useMap();
@@ -39,7 +40,7 @@ export default function MapPreview({ latitude, longitude }) {
             zoomOffset={MAPBOX_ZOOM_OFFSET}
           />
           <AttributionControl prefix="Leaflet" />
-          {position && <Marker position={position} />}
+          {position && <Circle center={position} {...MARKER_STYLE} />}
           <Recenter position={position} />
         </MapContainer>
       </div>

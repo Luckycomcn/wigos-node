@@ -64,6 +64,10 @@ CODELISTS = {
         "member_codes": None,
         "force_turtle": True,
     },
+    # ISO3166 is intentionally not listed here: it has no codes.wmo.int
+    # registry to refresh from. api/codelists/ISO3166.csv is a static seed
+    # (ISO 3166-1 numeric codes, plus the WIGOS-specific "Legacy" issuer
+    # code 20000) maintained by hand and served as-is by the codelist view.
 }
 
 TURTLE_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", '"': '"', "\\": "\\", "'": "'"}

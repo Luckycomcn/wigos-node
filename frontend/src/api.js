@@ -10,8 +10,9 @@ export async function getHello() {
   return res.json();
 }
 
-export async function saveStation(wigosIdentifier, record) {
-  const res = await fetch(`${API_URL}/api/wmdrv2/${encodeURIComponent(wigosIdentifier)}`, {
+export async function saveStation(id, record) {
+  const url = id == null ? `${API_URL}/api/wmdrv2/` : `${API_URL}/api/wmdrv2/${encodeURIComponent(id)}`;
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(record),
@@ -23,8 +24,8 @@ export async function saveStation(wigosIdentifier, record) {
   return data;
 }
 
-export async function getStation(wigosIdentifier) {
-  const res = await fetch(`${API_URL}/api/wmdrv2/${encodeURIComponent(wigosIdentifier)}`);
+export async function getStation(id) {
+  const res = await fetch(`${API_URL}/api/wmdrv2/${encodeURIComponent(id)}`);
   const data = await res.json();
   if (!res.ok) {
     throw new Error(data.detail || `API request failed: ${res.status}`);
