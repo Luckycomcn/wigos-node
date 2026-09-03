@@ -114,10 +114,9 @@ class Wmdrv2View(APIView):
 
         
         station.wmdrv2 = request.data # we only need to set the wmdrv2 field, the save method will handle updating index fields
-    
-        station.save(owner=request.user) # pass the owner to the save method to set the owner field
-        #station.save() # pass the owner to the save method to set the owner field
-        
+
+        station.save() # owner is unchanged on update; Station.save() forwards **kwargs to Model.save(), which rejects `owner`
+
         return Response({"message": f"WMDv2 data for station {station_id} updated successfully."}, status=200)
 
     def post(self, request, station_id=None):
@@ -133,28 +132,27 @@ class Wmdrv2View(APIView):
         # Create a new Station instance
         station = Station(wmdrv2=wmdrv2_data, owner=owner)
 
-        # assign permissions
-        assign_perm('change_station', owner, station)
-
         issuer_of_identifiers = [wsi.split('-')[1] for wsi in station.get_wigos_identifiers()]
 
-        # check if the user in in all of the groups corresponding to the issuer identifiers (allowed to create stations for these issuers)
+        # check if the user is in all of the groups corresponding to the issuer identifiers (allowed to create stations for these issuers)
         for issuer_id in issuer_of_identifiers:
             if not WIGOSNodeGroup.objects.filter(issuer_identifier=issuer_id, group__user=request.user).exists():
                 return Response({"error": f"You do not have permission to create a station for the issuer of identifier {issuer_id}."}, status=status.HTTP_403_FORBIDDEN)
 
-        
-        for issuer_id in issuer_of_identifiers:
-            groups = WIGOSNodeGroup.objects.filter(issuer_identifier=issuer_id)
-            if not groups.exists():
-                for group in groups.all():
-                    assign_perm('change_station', group, station)
-            else:
-                logger.warning(f"No group found for issuer_identifier {issuer_id}. Station {station.id} will not be assigned to any group for this WSI.")
-        
         try:
             station.save()  # This will also update the name and location based on the WMDv2 data
         except ValueError as e:
             return Response({"detail": str(e)}, status=400)
+
+        # assign permissions (after save so the station has a pk to attach object permissions to)
+        assign_perm('change_station', owner, station)
+
+        for issuer_id in issuer_of_identifiers:
+            node_groups = WIGOSNodeGroup.objects.filter(issuer_identifier=issuer_id)
+            if node_groups.exists():
+                for node_group in node_groups:
+                    assign_perm('change_station', node_group.group, station)
+            else:
+                logger.warning(f"No group found for issuer_identifier {issuer_id}. Station {station.id} will not be assigned to any group for this WSI.")
 
         return Response({"message": f"Station {station.id} created successfully.", "station_id": station.id}, status=201)

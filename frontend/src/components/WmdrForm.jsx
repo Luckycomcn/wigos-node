@@ -77,7 +77,7 @@ export default function WmdrForm({ stationId, onSaved, onCancel }) {
     try {
       const data = await saveStation(stationId, record);
       setSubmitState({ status: "success", data });
-      onSaved?.(data.id);
+      onSaved?.(data.station_id);
     } catch (err) {
       setSubmitState({ status: "error", error: err.message });
     }

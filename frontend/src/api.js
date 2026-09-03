@@ -10,8 +10,8 @@ export async function getHello() {
   return res.json();
 }
 
-export async function saveStation(id, record) {
-  const url = id == null ? `${API_URL}/api/wmdrv2/` : `${API_URL}/api/wmdrv2/${encodeURIComponent(id)}`;
+export async function saveStation(stationId, record) {
+  const url = stationId == null ? `${API_URL}/api/wmdrv2/` : `${API_URL}/api/wmdrv2/${encodeURIComponent(stationId)}`;
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -24,8 +24,8 @@ export async function saveStation(id, record) {
   return data;
 }
 
-export async function getStation(id) {
-  const res = await fetch(`${API_URL}/api/wmdrv2/${encodeURIComponent(id)}`);
+export async function getStation(stationId) {
+  const res = await fetch(`${API_URL}/api/wmdrv2/${encodeURIComponent(stationId)}`);
   const data = await res.json();
   if (!res.ok) {
     throw new Error(data.detail || `API request failed: ${res.status}`);

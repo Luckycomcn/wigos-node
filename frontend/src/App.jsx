@@ -15,13 +15,13 @@ export default function App() {
         {view.mode === "list" && (
           <StationsList
             onNew={() => setView({ mode: "new" })}
-            onEdit={(id) => setView({ mode: "edit", id })}
+            onEdit={(stationId) => setView({ mode: "edit", stationId })}
           />
         )}
         {view.mode !== "list" && (
           <WmdrForm
-            key={view.mode === "edit" ? view.id : "new"}
-            stationId={view.mode === "edit" ? view.id : null}
+            key={view.mode === "edit" ? view.stationId : "new"}
+            stationId={view.mode === "edit" ? view.stationId : null}
             onSaved={() => setView({ mode: "list" })}
             onCancel={() => setView({ mode: "list" })}
           />
