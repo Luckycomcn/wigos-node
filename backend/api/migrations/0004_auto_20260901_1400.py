@@ -1,7 +1,24 @@
+import csv
+import logging
+
 from django.db import migrations
 
+logger = logging.getLogger(__name__)
 
-wmo_members = [('Switzerland', 0), ('Germany', 1), ('France', 2)] # for testing
+wmo_members = []
+
+# Read ISO3166.csv and populate wmo_members
+with open('/app/api/codelists/ISO3166.csv', 'r') as f:
+    reader = csv.DictReader(f)
+    for i, row in enumerate(reader):
+        # Assuming 'name' column for country name, adjust as needed
+        name = row.get('rdfs:label', None)
+        iso_code = row.get('skos:notation', None)
+        if not name or not iso_code:
+            logger.warning(f"Skipping row {i} due to missing data: {row}")
+            continue  # Skip rows with missing data
+        wmo_members.append((name, iso_code))
+
 
 name_template = 'nfps_{}'  # Template for group names
 
@@ -12,14 +29,14 @@ def create_custom_groups(apps, schema_editor):
     WIGOSNodeGroup = apps.get_model('api', 'WIGOSNodeGroup')
     Permission = apps.get_model('auth', 'Permission')
 
-    for (member_name, issuer_identifier) in wmo_members:
+    for (name, iso_code) in wmo_members:
 
         # Create the group
-        group, created = Group.objects.get_or_create(name=name_template.format(member_name))
+        group, created = Group.objects.get_or_create(name=name_template.format(name))
 
         WIGOSNodeGroup.objects.update_or_create(
             group=group,
-            defaults={"issuer_identifier": issuer_identifier}
+            defaults={"issuer_identifier": iso_code}
         )
 
         # Find and assign specific permissions
@@ -34,8 +51,8 @@ def create_custom_groups(apps, schema_editor):
 
 def remove_custom_groups(apps, schema_editor):
     Group = apps.get_model('auth', 'Group')
-    for (member_name, issuer_identifier) in wmo_members:
-        Group.objects.filter(name=name_template.format(member_name)).delete()
+    for (name, iso_code) in wmo_members:
+        Group.objects.filter(name=name_template.format(name)).delete()
 
 class Migration(migrations.Migration):
 

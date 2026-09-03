@@ -17,7 +17,12 @@ class Migration(migrations.Migration):
         test_data_dir = "/test_data"
 
         User = apps.get_model('api', 'WIGOSNodeUser')
-        admin_user = User.objects.create(is_superuser=True, is_staff=True, username='admin',password='admin',email='wis@wmo.int')
+
+        admin_user = User.objects.create_superuser(
+            username='admin',
+            password='admin',
+            email='wis@wmo.int'
+        )
         
         for station_json in [f for f in os.listdir(test_data_dir) if f.endswith('.json')]:
             with open(os.path.join(test_data_dir, station_json), 'r') as f:

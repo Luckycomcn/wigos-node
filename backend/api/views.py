@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 import django.http
@@ -11,7 +12,9 @@ from rest_framework.permissions import SAFE_METHODS, BasePermission, IsAuthentic
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Station
+from .models import Station, WIGOSNodeGroup
+
+logger = logging.getLogger(__name__)
 
 
 class ReadOnly(BasePermission):
@@ -61,17 +64,17 @@ def my_stations(request):
     ])
 
 
+@api_view(["GET"])
+def my_issuer_of_identifiers(request):
+    groups = WIGOSNodeGroup.objects.filter(group__user=request.user)
+    issuer_identifiers = [group.issuer_identifier for group in groups]
+    return Response({"issuer_of_identifiers": issuer_identifiers})    
+
+
 class Wmdrv2View(APIView):
     permission_classes = [IsAuthenticated | ReadOnly]
 
-    # DRF automatically runs this before get() or post()
-    # def initial(self, request, *args, **kwargs):
-    #     super().initial(request, *args, **kwargs)
-    #     wigos_identifier = kwargs.get('wigos_identifier')
-    #     if not check_wigos_identifier(wigos_identifier):
-    #         from rest_framework.exceptions import ValidationError
-    #         raise ValidationError(f"Invalid WIGOS identifier: '{wigos_identifier}'")
-
+ 
     def get(self, request, station_id=None):
 
         if station_id is None:
@@ -102,6 +105,13 @@ class Wmdrv2View(APIView):
 
         if not request.user.has_perm('change_station', station):
             return Response({"error": "You do not have permission to change this station."}, status=status.HTTP_403_FORBIDDEN)
+
+        issuer_of_identifiers = [wsi.split('-')[1] for wsi in station.get_wigos_identifiers()]
+        # check if the user in in all of the groups corresponding to the issuer identifiers (allowed to create stations for these issuers)
+        for issuer_id in issuer_of_identifiers:
+            if not WIGOSNodeGroup.objects.filter(issuer_identifier=issuer_id, group__user=request.user).exists():
+                return Response({"error": f"You do not have permission to update a station for the issuer of identifier {issuer_id}."}, status=status.HTTP_403_FORBIDDEN)
+
         
         station.wmdrv2 = request.data # we only need to set the wmdrv2 field, the save method will handle updating index fields
     
@@ -125,7 +135,22 @@ class Wmdrv2View(APIView):
 
         # assign permissions
         assign_perm('change_station', owner, station)
+
+        issuer_of_identifiers = [wsi.split('-')[1] for wsi in station.get_wigos_identifiers()]
+
+        # check if the user in in all of the groups corresponding to the issuer identifiers (allowed to create stations for these issuers)
+        for issuer_id in issuer_of_identifiers:
+            if not WIGOSNodeGroup.objects.filter(issuer_identifier=issuer_id, group__user=request.user).exists():
+                return Response({"error": f"You do not have permission to create a station for the issuer of identifier {issuer_id}."}, status=status.HTTP_403_FORBIDDEN)
+
         
+        for issuer_id in issuer_of_identifiers:
+            groups = WIGOSNodeGroup.objects.filter(issuer_identifier=issuer_id)
+            if not groups.exists():
+                for group in groups.all():
+                    assign_perm('change_station', group, station)
+            else:
+                logger.warning(f"No group found for issuer_identifier {issuer_id}. Station {station.id} will not be assigned to any group for this WSI.")
         
         try:
             station.save()  # This will also update the name and location based on the WMDv2 data
