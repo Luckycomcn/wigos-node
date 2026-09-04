@@ -106,11 +106,13 @@ class Wmdrv2View(APIView):
         if not request.user.has_perm('change_station', station):
             return Response({"error": "You do not have permission to change this station."}, status=status.HTTP_403_FORBIDDEN)
 
-        issuer_of_identifiers = [wsi.split('-')[1] for wsi in station.get_wigos_identifiers()]
-        # check if the user in in all of the groups corresponding to the issuer identifiers (allowed to create stations for these issuers)
-        for issuer_id in issuer_of_identifiers:
-            if not WIGOSNodeGroup.objects.filter(issuer_identifier=issuer_id, group__user=request.user).exists():
-                return Response({"error": f"You do not have permission to update a station for the issuer of identifier {issuer_id}."}, status=status.HTTP_403_FORBIDDEN)
+        # superusers bypass the per-issuer group check (Django convention)
+        if not request.user.is_superuser:
+            issuer_of_identifiers = [wsi.split('-')[1] for wsi in station.get_wigos_identifiers()]
+            # check that the user is in a group for every issuer of identifier on this station
+            for issuer_id in issuer_of_identifiers:
+                if not WIGOSNodeGroup.objects.filter(issuer_identifier=issuer_id, group__user=request.user).exists():
+                    return Response({"error": f"You do not have permission to update a station for the issuer of identifier {issuer_id}."}, status=status.HTTP_403_FORBIDDEN)
 
         
         station.wmdrv2 = request.data # we only need to set the wmdrv2 field, the save method will handle updating index fields
@@ -134,10 +136,12 @@ class Wmdrv2View(APIView):
 
         issuer_of_identifiers = [wsi.split('-')[1] for wsi in station.get_wigos_identifiers()]
 
-        # check if the user is in all of the groups corresponding to the issuer identifiers (allowed to create stations for these issuers)
-        for issuer_id in issuer_of_identifiers:
-            if not WIGOSNodeGroup.objects.filter(issuer_identifier=issuer_id, group__user=request.user).exists():
-                return Response({"error": f"You do not have permission to create a station for the issuer of identifier {issuer_id}."}, status=status.HTTP_403_FORBIDDEN)
+        # superusers bypass the per-issuer group check (Django convention)
+        if not request.user.is_superuser:
+            # check that the user is in a group for every issuer of identifier on this station
+            for issuer_id in issuer_of_identifiers:
+                if not WIGOSNodeGroup.objects.filter(issuer_identifier=issuer_id, group__user=request.user).exists():
+                    return Response({"error": f"You do not have permission to create a station for the issuer of identifier {issuer_id}."}, status=status.HTTP_403_FORBIDDEN)
 
         try:
             station.save()  # This will also update the name and location based on the WMDv2 data

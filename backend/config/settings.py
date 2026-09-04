@@ -89,6 +89,17 @@ CORS_ALLOWED_ORIGINS = os.environ.get(
     "CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
 ).split(",")
 
+# Allow the SPA to send the session cookie on cross-origin API calls (used when
+# the frontend talks to :8000 directly instead of through the Vite dev proxy).
+CORS_ALLOW_CREDENTIALS = True
+
+# Origins Django trusts for unsafe (POST/PUT) requests. The Vite dev proxy keeps
+# the browser on :5173 while forwarding to Django, so that origin must be listed
+# or every login/write request is rejected with 403.
+CSRF_TRUSTED_ORIGINS = os.environ.get(
+    "CSRF_TRUSTED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+).split(",")
+
 REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.AllowAny",

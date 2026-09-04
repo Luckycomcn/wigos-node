@@ -1,9 +1,18 @@
 import { parseCsv } from "./csv";
+import { csrfHeader } from "./auth";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const API_URL = import.meta.env.VITE_API_URL || "";
+
+// Notify the app when the session is gone so it can drop back to the login page.
+function handle401(res) {
+  if (res.status === 401) {
+    window.dispatchEvent(new Event("auth:unauthenticated"));
+  }
+  return res;
+}
 
 export async function getHello() {
-  const res = await fetch(`${API_URL}/api/hello/`);
+  const res = handle401(await fetch(`${API_URL}/api/hello/`, { credentials: "include" }));
   if (!res.ok) {
     throw new Error(`API request failed: ${res.status}`);
   }
@@ -12,11 +21,12 @@ export async function getHello() {
 
 export async function saveStation(stationId, record) {
   const url = stationId == null ? `${API_URL}/api/wmdrv2/` : `${API_URL}/api/wmdrv2/${encodeURIComponent(stationId)}`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+  const res = handle401(await fetch(url, {
+    method: stationId == null ? "POST" : "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json", ...csrfHeader() },
     body: JSON.stringify(record),
-  });
+  }));
   const data = await res.json();
   if (!res.ok) {
     throw new Error(data.detail || `API request failed: ${res.status}`);
@@ -25,7 +35,9 @@ export async function saveStation(stationId, record) {
 }
 
 export async function getStation(stationId) {
-  const res = await fetch(`${API_URL}/api/wmdrv2/${encodeURIComponent(stationId)}`);
+  const res = handle401(await fetch(`${API_URL}/api/wmdrv2/${encodeURIComponent(stationId)}`, {
+    credentials: "include",
+  }));
   const data = await res.json();
   if (!res.ok) {
     throw new Error(data.detail || `API request failed: ${res.status}`);
@@ -34,7 +46,17 @@ export async function getStation(stationId) {
 }
 
 export async function listMyStations() {
-  const res = await fetch(`${API_URL}/api/my_stations/`);
+  const res = handle401(await fetch(`${API_URL}/api/my_stations/`, { credentials: "include" }));
+  if (!res.ok) {
+    throw new Error(`API request failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function listMyIssuers() {
+  const res = handle401(await fetch(`${API_URL}/api/my_issuer_of_identifiers/`, {
+    credentials: "include",
+  }));
   if (!res.ok) {
     throw new Error(`API request failed: ${res.status}`);
   }
@@ -42,7 +64,7 @@ export async function listMyStations() {
 }
 
 export async function getCodelist(scheme) {
-  const res = await fetch(`${API_URL}/api/codelists/${scheme}.csv`);
+  const res = await fetch(`${API_URL}/api/codelists/${scheme}.csv`, { credentials: "include" });
   if (!res.ok) {
     throw new Error(`Failed to load codelist ${scheme}: ${res.status}`);
   }

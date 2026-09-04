@@ -72,7 +72,7 @@ export default function StationsMap({ stations }) {
         {positioned.map((station) => {
           const radius = Math.max(MIN_MARKER_RADIUS_METERS, TARGET_PIXEL_RADIUS * metersPerPixel(station.lat, zoom));
           return (
-            <Circle key={station.id} center={[station.lat, station.lon]} radius={radius} {...MARKER_STYLE}>
+            <Circle key={station.station_id} center={[station.lat, station.lon]} radius={radius} {...MARKER_STYLE}>
               <Popup>
                 <strong>{station.name}</strong>
                 <br />

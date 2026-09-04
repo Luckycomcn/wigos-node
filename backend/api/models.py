@@ -1,4 +1,4 @@
-from sre_parse import parse
+from jsonpath_ng import parse
 
 from django.contrib.auth.models import AbstractUser, Group
 from django.contrib.gis.db import models as gis_models
@@ -70,21 +70,36 @@ class Station(models.Model):
             if wsi and len(wsi) > 0:
                 wsis.append(wsi[0].value)
 
-            for additional_wsi in additional_wigos_identifier_expression.find(self.wmdrv2):
-                if additional_wsi and len(additional_wsi) > 0:
-                    wsis.append(additional_wsi[0].value)
+            for match in additional_wigos_identifier_expression.find(self.wmdrv2):
+                value = match.value
+                if isinstance(value, (list, tuple)):
+                    wsis.extend(v for v in value if v)
+                elif value:
+                    wsis.append(value)
 
         return wsis
 
     def save(self, *args, **kwargs):
         """override save method to update name and location from wmdrv2 JSON data"""
 
-        if Station.objects.filter(wigos_identifier=self.wigos_identifier).exclude(pk=self.pk).exists():
-            raise ValueError(f"WIGOS identifier '{self.wigos_identifier}' is already in use")
+        # wigos_identifier is a GeneratedField (unreadable before the row is
+        # written), so derive the primary WSI from the JSON to pre-check it.
+        primary = wigos_identifier_expression.find(self.wmdrv2)
+        primary_wsi = primary[0].value if primary else None
+        if primary_wsi and Station.objects.filter(wigos_identifier=primary_wsi).exclude(pk=self.pk).exists():
+            raise ValueError(f"WIGOS identifier '{primary_wsi}' is already in use")
 
         update_station_geometry(self, self.wmdrv2)
 
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return self.name + " (" + self.wigos_identifier + ") lat: " + str(self.location.y) + " lon: " + str(self.location.x) + " wmdrvs: " + str(self.wmdrv2)
+        try:
+            return (
+                f"{self.name} ({self.wigos_identifier}) "
+                f"lat: {self.location.y} lon: {self.location.x} wmdrvs: {self.wmdrv2}"
+            )
+        except (AttributeError, TypeError):
+            # unsaved instance: generated fields / location not available yet
+            wsis = self.get_wigos_identifiers()
+            return f"Station({wsis[0] if wsis else 'unsaved'})"
