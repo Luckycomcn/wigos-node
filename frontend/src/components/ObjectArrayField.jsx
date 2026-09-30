@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import StringListField from "./StringListField";
+import ConceptField from "./ConceptField";
 
 const INPUT_TYPES = ["text", "date", "datetime-local"];
 
 function emptyValueForField(field) {
-  if (INPUT_TYPES.includes(field.type) || field.type === "select") return "";
+  if (field.default !== undefined) return field.default;
+  if (INPUT_TYPES.includes(field.type)) return "";
+  if (field.type === "concept") return null;
   if (field.type === "object") return emptyItem(field.fields);
   if (field.type === "array-object" && field.required) return [emptyItem(field.fields)];
   return [];
@@ -34,35 +37,18 @@ export function ObjectArrayItemRow({ item, fields, onChange, path, onDrillInto }
             </div>
           );
         }
-        if (field.type === "select") {
+        if (field.type === "concept") {
           return (
-            <div className="field" key={field.name}>
-              <label>
-                {field.label} {field.required && <span className="required">*</span>}
-              </label>
-              <select
-                className="field-input"
-                value={item[field.name] || ""}
-                onChange={(e) => onChange({ ...item, [field.name]: e.target.value })}
-              >
-                <option value="">None selected</option>
-                {field.groups
-                  ? field.groups.map((group) => (
-                      <optgroup label={group.label} key={group.label}>
-                        {group.options.map((opt) => (
-                          <option key={opt.code} value={opt.code}>
-                            {opt.label}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))
-                  : (field.options || []).map((opt) => (
-                      <option key={opt.code} value={opt.code}>
-                        {opt.label}
-                      </option>
-                    ))}
-              </select>
-            </div>
+            <ConceptField
+              key={field.name}
+              label={field.label}
+              value={item[field.name]}
+              onChange={(next) => onChange({ ...item, [field.name]: next })}
+              options={field.options}
+              groups={field.groups}
+              required={field.required}
+              placeholder={field.placeholder}
+            />
           );
         }
         if (field.type === "array-string") {
@@ -72,6 +58,8 @@ export function ObjectArrayItemRow({ item, fields, onChange, path, onDrillInto }
               label={field.label}
               values={item[field.name] || []}
               onChange={(next) => onChange({ ...item, [field.name]: next })}
+              placeholder={field.placeholder}
+              required={field.required}
             />
           );
         }
@@ -104,6 +92,7 @@ export function ObjectArrayItemRow({ item, fields, onChange, path, onDrillInto }
             path={[...path, field.name]}
             onDrillInto={onDrillInto}
             maxItems={field.maxItems}
+            required={field.required}
           />
         );
       })}

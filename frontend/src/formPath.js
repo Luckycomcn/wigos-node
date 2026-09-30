@@ -11,7 +11,10 @@ export function setAtPath(obj, path, value) {
   return copy;
 }
 
-function isRequiredValueFilled(value) {
+function isRequiredValueFilled(field, value) {
+  if (field.type === "concept") return (value?.id || "").trim() !== "";
+  if (field.type === "array-string") return (value || []).some((v) => v.trim() !== "");
+  if (field.type === "array-object") return (value || []).length > 0;
   return typeof value === "string" ? value.trim() !== "" : value != null;
 }
 
@@ -20,7 +23,7 @@ function isRequiredValueFilled(value) {
 // (each entry must itself satisfy its own fields' required checks).
 export function isFieldsetComplete(item, fields) {
   return fields.every((field) => {
-    if (field.required && !isRequiredValueFilled(item?.[field.name])) return false;
+    if (field.required && !isRequiredValueFilled(field, item?.[field.name])) return false;
     if (field.type === "object") {
       return isFieldsetComplete(item?.[field.name] || {}, field.fields);
     }

@@ -1,38 +1,53 @@
 import { useEffect, useState } from "react";
 import {
   WIGOS_ID_PATTERN,
-  isValidWmdrRecord,
   buildWmdrRecord,
   parseWmdrRecord,
   splitWigosId,
   joinWigosId,
 } from "../wmdr";
+import { validateWmdrRecord } from "../wmdrSchema";
 import { saveStation, getStation, getCodelist } from "../api";
 import StringListField from "./StringListField";
 import ContactsField from "./ContactsField";
-import ObservingCapabilitiesField from "./ObservingCapabilitiesField";
+import ConceptField from "./ConceptField";
+import ObjectArrayField, { ObjectArrayItemRow } from "./ObjectArrayField";
+import ObservationsField from "./ObservationsField";
 import MapPreview from "./MapPreview";
+import { TIME_FIELDS, LINK_FIELDS } from "../fieldDefs";
 
 const initialState = {
   id: "",
   latitude: "",
   longitude: "",
   height: "",
+  time: { date: "", timestamp: "", intervalStart: "", intervalEnd: "", resolution: "" },
   title: "",
   description: "",
   additionalTitles: [""],
   additionalIds: [""],
-  facilityType: "",
-  wmoRegion: "",
+  facilityType: null,
+  wmoRegion: null,
   contacts: [],
   created: "",
   updated: "",
-  keywords: [""],
-  territories: [""],
-  programAffiliations: [""],
-  observingCapabilities: [],
-  links: [""],
+  territories: [],
+  externalIds: [],
+  observations: [],
+  links: [],
 };
+
+const EXTERNAL_ID_FIELDS = [
+  { name: "value", label: "Identifier", type: "text", required: true },
+  { name: "scheme", label: "Scheme", type: "text", placeholder: "Issuing authority, ideally a resolvable URI" },
+];
+
+const TERRITORY_FIELDS = [
+  { name: "territory", label: "Territory", type: "concept", required: true, placeholder: "TerritoryName notation, e.g. CHE" },
+  { name: "dateStart", label: "From", type: "date" },
+  { name: "dateEnd", label: "To (empty if ongoing)", type: "date" },
+];
+
 
 export default function WmdrForm({ stationId, onSaved, onCancel }) {
   const isEditing = stationId != null;
@@ -67,12 +82,13 @@ export default function WmdrForm({ stationId, onSaved, onCancel }) {
   const setIdPart = (part) => (e) => set("id")(joinWigosId({ ...idParts, [part]: e.target.value }));
 
   const idValid = form.id === "" || WIGOS_ID_PATTERN.test(form.id);
-  const valid = isValidWmdrRecord(form);
-  const record = valid ? buildWmdrRecord(form) : null;
+  const record = buildWmdrRecord(form);
+  const schemaErrors = validateWmdrRecord(record);
+  const valid = schemaErrors.length === 0;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!record) return;
+    if (!valid) return;
     setSubmitState({ status: "loading" });
     try {
       const data = await saveStation(stationId, record);
@@ -202,6 +218,13 @@ export default function WmdrForm({ stationId, onSaved, onCancel }) {
                 />
               </div>
             </div>
+
+            <div className="nested-card">
+              <div className="nested-card-header">
+                <span>Time</span>
+              </div>
+              <ObjectArrayItemRow item={form.time} fields={TIME_FIELDS} onChange={set("time")} path={["time"]} />
+            </div>
           </div>
 
           <div className="card">
@@ -219,30 +242,24 @@ export default function WmdrForm({ stationId, onSaved, onCancel }) {
 
             <StringListField label="Additional titles" values={form.additionalTitles} onChange={set("additionalTitles")} />
             <StringListField label="Additional IDs" values={form.additionalIds} onChange={set("additionalIds")} />
+            <ObjectArrayField
+              label="External IDs"
+              itemLabel="External ID"
+              values={form.externalIds}
+              onChange={set("externalIds")}
+              fields={EXTERNAL_ID_FIELDS}
+              itemSummary={(e) => [e.scheme, e.value].filter(Boolean).join(": ")}
+              path={[]}
+            />
 
             <div className="row">
-              <div className="field">
-                <label>Facility type</label>
-                <select className="field-input" value={form.facilityType} onChange={setInput("facilityType")}>
-                  <option value="">None selected</option>
-                  {facilityTypes.map((opt) => (
-                    <option key={opt.code} value={opt.code}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="field">
-                <label>WMO region</label>
-                <select className="field-input" value={form.wmoRegion} onChange={setInput("wmoRegion")}>
-                  <option value="">None selected</option>
-                  {wmoRegions.map((opt) => (
-                    <option key={opt.code} value={opt.code}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <ConceptField
+                label="Facility type"
+                value={form.facilityType}
+                onChange={set("facilityType")}
+                options={facilityTypes}
+              />
+              <ConceptField label="WMO region" value={form.wmoRegion} onChange={set("wmoRegion")} options={wmoRegions} />
             </div>
 
             <ContactsField value={form.contacts} onChange={set("contacts")} />
@@ -260,22 +277,30 @@ export default function WmdrForm({ stationId, onSaved, onCancel }) {
               </div>
             </div>
 
-            <StringListField label="Keywords" values={form.keywords} onChange={set("keywords")} />
-            <StringListField label="Territories" values={form.territories} onChange={set("territories")} />
-            <StringListField
-              label="Program affiliations"
-              values={form.programAffiliations}
-              onChange={set("programAffiliations")}
+            <ObjectArrayField
+              label="Territories"
+              itemLabel="Territory"
+              values={form.territories}
+              onChange={set("territories")}
+              fields={TERRITORY_FIELDS}
+              itemSummary={(t) => t.territory?.id}
+              path={[]}
             />
-            <ObservingCapabilitiesField
-              value={form.observingCapabilities}
-              onChange={set("observingCapabilities")}
-            />
+            <ObservationsField value={form.observations} onChange={set("observations")} />
           </div>
 
           <div className="card">
             <h3>Links</h3>
-            <StringListField label="Links (href)" values={form.links} onChange={set("links")} required />
+            <ObjectArrayField
+              label="Links"
+              itemLabel="Link"
+              values={form.links}
+              onChange={set("links")}
+              fields={LINK_FIELDS}
+              itemSummary={(l) => l.title || l.href}
+              path={[]}
+              required
+            />
           </div>
 
           <div className="form-actions">
@@ -304,9 +329,19 @@ export default function WmdrForm({ stationId, onSaved, onCancel }) {
           </div>
           <div className="card">
             <h3>GeoJSON preview</h3>
-            <pre className="geojson-preview">
-              {record ? JSON.stringify(record, null, 2) : "Fill in all required (*) fields to preview"}
-            </pre>
+            {valid ? (
+              <div className="status-message status-success">Valid against the WMDR2 schema.</div>
+            ) : (
+              <div className="status-message status-error">
+                Not yet valid against the WMDR2 schema:
+                <ul className="schema-errors">
+                  {schemaErrors.map((error) => (
+                    <li key={error}>{error}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <pre className="geojson-preview">{JSON.stringify(record, null, 2)}</pre>
           </div>
         </div>
       </div>

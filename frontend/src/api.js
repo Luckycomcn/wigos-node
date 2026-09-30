@@ -74,6 +74,8 @@ export async function getCodelist(scheme) {
       code: row["skos:notation"],
       label: row["rdfs:label"] || row["skos:notation"],
       id: (row["@id"] || "").replace(/^<|>$/g, ""),
+      // Stored as a quoted RDF literal with a language tag, e.g. 'Africa'@en.
+      description: (row["dct:description"] || "").replace(/@[A-Za-z-]+$/, "").replace(/^'([\s\S]*)'$/, "$1").trim(),
     }))
     .filter((entry) => entry.code);
 }

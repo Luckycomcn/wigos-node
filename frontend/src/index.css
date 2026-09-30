@@ -169,6 +169,10 @@ h3 {
   margin-bottom: 0.4rem;
 }
 
+.concept-detail {
+  margin-top: 0.4rem;
+}
+
 .btn {
   border: none;
   border-radius: var(--radius-sm);
@@ -234,6 +238,14 @@ h3 {
   background: #fef2f2;
   color: var(--danger);
   border: 1px solid #fecaca;
+}
+
+.schema-errors {
+  margin: 0.4rem 0 0;
+  padding-left: 1.2rem;
+  max-height: 160px;
+  overflow: auto;
+  font-size: 0.85rem;
 }
 
 .sticky-col {

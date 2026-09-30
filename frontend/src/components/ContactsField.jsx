@@ -2,6 +2,7 @@ import { useState } from "react";
 import ObjectArrayField, { ObjectArrayItemRow } from "./ObjectArrayField";
 import Dialog from "./Dialog";
 import { getAtPath, setAtPath, isFieldsetComplete } from "../formPath";
+import { CONTACT_LINK_FIELDS, LOGO_FIELDS } from "../fieldDefs";
 
 const PHONE_FIELDS = [
   { name: "value", label: "Phone number", type: "text", placeholder: "+41791234567" },
@@ -26,6 +27,7 @@ const CONTACT_FIELDS = [
   { name: "organization", label: "Organization", type: "text", required: true },
   { name: "name", label: "Name", type: "text" },
   { name: "position", label: "Position", type: "text" },
+  { name: "identifier", label: "Identifier", type: "text", placeholder: "Unique contact identifier" },
   { name: "phones", label: "Phone", type: "array-object", fields: PHONE_FIELDS, summary: (p) => p.value },
   { name: "emails", label: "Email", type: "array-object", fields: EMAIL_FIELDS, summary: (e) => e.value },
   {
@@ -35,7 +37,11 @@ const CONTACT_FIELDS = [
     fields: ADDRESS_FIELDS,
     summary: (a) => [a.city, a.country].filter(Boolean).join(", "),
   },
+  { name: "links", label: "Link", type: "array-object", fields: CONTACT_LINK_FIELDS, summary: (l) => l.title || l.href },
+  { name: "hoursOfService", label: "Hours of service", type: "text" },
+  { name: "contactInstructions", label: "Contact instructions", type: "text" },
   { name: "roles", label: "Roles", type: "array-string" },
+  { name: "logo", label: "Logo", type: "object", fields: LOGO_FIELDS },
 ];
 
 export default function ContactsField({ value, onChange }) {
