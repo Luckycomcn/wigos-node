@@ -1,15 +1,19 @@
-from jsonpath_ng import parse
-
 from django.contrib.auth.models import AbstractUser, Group
 from django.contrib.gis.db import models as gis_models
 from django.db import models
-from django.db.models import GeneratedField
+from django.db.models import F, Func, GeneratedField, Value
+from django.db.models.fields.json import KT
 from django.db.models.functions import Cast
+from jsonpath_ng import parse
 
 from .utils import update_station_geometry
 
 wigos_identifier_expression = parse('$.id')
 additional_wigos_identifier_expression = parse('$.properties.additionalIds')
+
+class ExtractAndJoinJson(Func):
+    function = 'join_jsonb_path_array'  # Matches the SQL function name exactly
+
     
 
 class WIGOSNodeGroup(models.Model):
@@ -35,13 +39,15 @@ class WIGOSNodeUser(AbstractUser):
     def __str__(self):
         return self.email
 
+
+
 class Station(models.Model):
 
     wmdrv2 = models.JSONField(null=False, blank=False)
 
     name = GeneratedField(
         expression=Cast(
-            "wmdrv2__properties__title", 
+            KT("wmdrv2__properties__title"), 
             output_field=models.CharField(max_length=255)
         ),
         output_field=models.CharField(max_length=255),
@@ -50,12 +56,19 @@ class Station(models.Model):
 
     wigos_identifier = GeneratedField(
         expression=Cast(
-            "wmdrv2__id",
+            KT("wmdrv2__id"),
             output_field=models.CharField(max_length=255)
         ),
         output_field=models.CharField(max_length=255),
         db_persist=True,
         unique=True,
+    )
+
+    additional_wigos_identifiers = models.GeneratedField(
+        expression=ExtractAndJoinJson(F('wmdrv2'), Value('$.properties.additionalIds')),
+        output_field=models.CharField(max_length=255),
+        db_persist=True,
+        db_index=True,
     )
 
     location = gis_models.PointField(srid=4326, null=False, blank=False)
@@ -84,10 +97,14 @@ class Station(models.Model):
 
         # wigos_identifier is a GeneratedField (unreadable before the row is
         # written), so derive the primary WSI from the JSON to pre-check it.
-        primary = wigos_identifier_expression.find(self.wmdrv2)
-        primary_wsi = primary[0].value if primary else None
-        if primary_wsi and Station.objects.filter(wigos_identifier=primary_wsi).exclude(pk=self.pk).exists():
-            raise ValueError(f"WIGOS identifier '{primary_wsi}' is already in use")
+        for wsi in self.get_wigos_identifiers():
+            print("checking ", wsi)
+            if wsi and Station.objects.filter(wigos_identifier=wsi).exclude(pk=self.pk).exists():
+                raise ValueError(f"WIGOS identifier '{wsi}' is already in use in another station")
+
+            if wsi and Station.objects.filter(additional_wigos_identifiers__contains=wsi).exclude(pk=self.pk).exists():
+                raise ValueError(f"WIGOS identifier '{wsi}' is already in use in additional identifiers in another station")
+
 
         update_station_geometry(self, self.wmdrv2)
 

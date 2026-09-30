@@ -10,7 +10,7 @@ users = [
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('api', '0006_add_test_stations_20260901_1419'),
+        ('api', '0005_station_owner'),
     ]
 
    
