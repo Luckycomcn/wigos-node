@@ -12,13 +12,22 @@
       265
     ]
   },
+  "time": {
+    "interval": [
+      "2026-08-21",
+      ".."
+    ]
+  },
   "properties": {
+    "type": "facility",
     "title": "Test Station Alpha Renamed",
+    "description": "Very big description",
     "contacts": [
       {
-        "organization": "WMO",
+        "identifier": "contact:ahelguera@wmo.int",
         "name": "Alberto",
         "position": "Odd jobs",
+        "organization": "WMO",
         "phones": [
           {
             "value": "+41301292102",
@@ -37,47 +46,100 @@
         ],
         "addresses": [
           {
+            "deliveryPoint": [
+              "7bis Avenue de la Paix"
+            ],
             "city": "Geneva",
             "administrativeArea": "Geneva",
             "postalCode": "1201",
             "country": "Switzerland",
-            "deliveryPoint": [
-              "asd"
-            ],
             "roles": [
               "Work"
             ]
           }
         ],
+        "links": [
+          {
+            "href": "https://wmo.int",
+            "rel": "about",
+            "type": "text/html"
+          }
+        ],
         "roles": [
-          "Worker"
+          "pointOfContact"
         ]
       }
     ],
-    "created": "2026-08-21T16:28:00.000Z",
-    "observingCapabilities": [
+    "externalIds": [
       {
-        "observedProperty": "http://codes.wmo.int/wmdr/ObservedVariableAtmosphere/12166",
-        "observingMethod": "Eye",
-        "operatingStatus": "Active",
-        "sourceOfObservation": "Looking at it",
-        "time": {
-          "date": "2026-08-21",
-          "timestamp": "2026-08-21T16:29:00.000Z",
-          "interval": [
-            "2026-08-21",
-            "2026-08-21"
-          ],
-          "resolution": "P3H"
+        "scheme": "https://oscar.wmo.int/surface",
+        "value": "0-20000-0-12345"
+      }
+    ],
+    "created": "2026-08-21T16:28:00.000Z",
+    "updated": "2026-08-21T16:29:00.000Z",
+    "additionalIds": [
+      "0-51-21-2121",
+      "0-533-1212-12321"
+    ],
+    "additionalTitles": [
+      "A lot"
+    ],
+    "facilityType": {
+      "id": "landFixed",
+      "title": "Land (fixed)",
+      "url": "http://codes.wmo.int/wmdr/FacilityType/landFixed"
+    },
+    "wmoRegion": {
+      "id": "europe",
+      "title": "Europe",
+      "url": "http://codes.wmo.int/wmdr/WMORegion/europe"
+    },
+    "territories": [
+      {
+        "territory": {
+          "id": "CHE"
         },
-        "deployments": [
+        "dates": [
+          "2026-08-21",
+          ".."
+        ]
+      }
+    ],
+    "observations": [
+      {
+        "observedGeometry": {
+          "id": "point"
+        },
+        "observedProperty": {
+          "id": "12166",
+          "title": "Air Temperature",
+          "description": "Temperature of an air parcel. Note, temperature is a fundamental property of matter as defined in the SI system.",
+          "url": "http://codes.wmo.int/wmdr/ObservedVariableAtmosphere/12166"
+        },
+        "programAffiliations": [
+          {
+            "programAffiliation": {
+              "id": "GBON"
+            },
+            "reportingStatus": {
+              "id": "operational"
+            },
+            "dates": [
+              "2026-08-21",
+              ".."
+            ]
+          }
+        ],
+        "configurations": [
           {
             "id": "2302192",
-            "instrument": {
-              "id": "321321321312",
-              "manufacturer": "SUTRON",
-              "model": "12-12",
-              "serialNumber": "12-121-212"
+            "time": {
+              "interval": [
+                "2026-08-21",
+                ".."
+              ],
+              "resolution": "PT1H"
             },
             "geometry": {
               "type": "Point",
@@ -86,54 +148,39 @@
                 12
               ]
             },
-            "time": {
-              "date": "2026-08-21",
-              "timestamp": "2026-08-21T16:29:00.000Z",
-              "interval": [
-                "2026-08-21",
-                "2026-08-21"
-              ],
-              "resolution": "P1H"
+            "operatingStatus": {
+              "id": "operational"
             },
-            "keywords": [
-              "yes"
-            ],
-            "referenceSurfaces": [
-              {
-                "referenceSurface": "22128",
-                "verticalDistance": 2123112
+            "sourceOfObservation": {
+              "id": "manualReading"
+            },
+            "instrument": {
+              "id": "321321321312",
+              "manufacturer": "SUTRON",
+              "model": "12-12"
+            },
+            "instrumentSerialNumber": "12-121-212",
+            "verticalDistance": {
+              "distances": [
+                2
+              ],
+              "unit": {
+                "id": "m"
+              },
+              "referenceSurface": {
+                "id": "localGroundLevel"
               }
-            ]
+            }
           }
         ]
-      }
-    ],
-    "description": "Very big description",
-    "additionalTitles": [
-      "A lot"
-    ],
-    "additionalIds": [
-      "0-51-21-2121",
-      "0-533-1212-12321"
-    ],
-    "updated": "2026-08-21T16:29:00.000Z",
-    "keywords": [
-      "temperature"
-    ],
-    "territories": [
-      {
-        "territory": "geneva"
-      }
-    ],
-    "programAffiliations": [
-      {
-        "programAffiliation": "Gbon"
       }
     ]
   },
   "links": [
     {
-      "href": "http://wmo.int"
+      "href": "http://wmo.int",
+      "rel": "about",
+      "type": "text/html"
     }
   ]
 }
