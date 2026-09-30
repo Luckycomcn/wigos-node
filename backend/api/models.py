@@ -39,9 +39,12 @@ class WIGOSNodeUser(AbstractUser):
     def __str__(self):
         return self.email
 
-
+class StationQuerySet(models.QuerySet):
+    def check_wigos_identifier(self, wigos_identifier):
+        return self.filter(wigos_identifier=wigos_identifier).exists() or self.filter(additional_wigos_identifiers__contains=wigos_identifier).exists()
 
 class Station(models.Model):
+    objects = StationQuerySet.as_manager()
 
     wmdrv2 = models.JSONField(null=False, blank=False)
 

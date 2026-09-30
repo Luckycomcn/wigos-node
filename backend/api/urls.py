@@ -12,6 +12,7 @@ urlpatterns = [
     path("wmdrv2/",  Wmdrv2View.as_view() , name="wmdrv2"), # POST
     path("wmdrv2/<int:station_id>",  Wmdrv2View.as_view() , name="wmdrv2"), # GET and PUT
     path("my_issuer_of_identifiers/", views.my_issuer_of_identifiers, name="my_issuer_of_identifiers"),
+    path('check_wigosidentifiers/', views.check_wigosidentifiers, name='check_wigosidentifiers'),
     # JSON auth endpoints for the SPA (the DRF HTML login stays at auth/ below)
     path("csrf/", auth.csrf, name="auth-csrf"),
     path("login/", auth.login, name="auth-login"),

@@ -1,5 +1,7 @@
 import logging
+import re
 from pathlib import Path
+from pickle import GET
 
 import django.http
 from django.conf import settings
@@ -63,6 +65,13 @@ def my_stations(request):
         for station in my_stations
     ])
 
+@api_view(["GET"])
+def check_wigosidentifiers(request):
+    wigos_identifiers = request.query_params.getlist("wigos_identifier")
+    if len(wigos_identifiers) == 0:
+        return Response({"detail": "No WIGOS identifiers provided"}, status=400)
+    results = {wigos_identifier: Station.objects.check_wigos_identifier(wigos_identifier) for wigos_identifier in wigos_identifiers}
+    return Response(results)
 
 @api_view(["GET"])
 def my_issuer_of_identifiers(request):
