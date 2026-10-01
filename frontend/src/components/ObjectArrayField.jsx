@@ -144,23 +144,57 @@ export default function ObjectArrayField({
   const cardRefs = useRef({});
   useEffect(() => {
     if (mode !== "full") return undefined;
-    const handleFocusIn = (e) => {
+    // The card elements that `target` is outside of - decided at focus time,
+    // so a card added by the click that moved focus isn't included.
+    const cardsOutside = (target) => {
       // A drill-in Dialog is rendered outside the card's DOM subtree, but
       // it's still editing that card's data, so don't treat it as leaving.
-      if (e.target?.closest?.(".dialog-backdrop")) return;
+      if (target?.closest?.(".dialog-backdrop")) return [];
+      return Object.values(cardRefs.current).filter((node) => node && !node.contains(target));
+    };
+    const collapseCards = (nodes) => {
+      if (!nodes.length) return;
       setCollapsed((prev) => {
         let next = prev;
         Object.entries(cardRefs.current).forEach(([key, node]) => {
           const idx = Number(key);
-          if (prev.has(idx) || !node || node.contains(e.target)) return;
+          if (prev.has(idx) || !nodes.includes(node)) return;
           if (next === prev) next = new Set(prev);
           next.add(idx);
         });
         return next;
       });
     };
+    // Focus moves on pointerdown, before the click. Collapsing a card then
+    // shifts the layout, so the pointerup lands on a different element and
+    // the click (e.g. on a "+ Add" button below the card) is lost. Wait until
+    // the pointer is released and the click has been dispatched.
+    let pointerDown = false;
+    let pendingCards = null;
+    const handlePointerDown = () => {
+      pointerDown = true;
+    };
+    const handlePointerUp = () => {
+      pointerDown = false;
+      if (!pendingCards) return;
+      const nodes = pendingCards;
+      pendingCards = null;
+      setTimeout(() => collapseCards(nodes), 0);
+    };
+    const handleFocusIn = (e) => {
+      if (pointerDown) pendingCards = cardsOutside(e.target);
+      else collapseCards(cardsOutside(e.target));
+    };
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("pointerup", handlePointerUp, true);
+    document.addEventListener("pointercancel", handlePointerUp, true);
     document.addEventListener("focusin", handleFocusIn);
-    return () => document.removeEventListener("focusin", handleFocusIn);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("pointerup", handlePointerUp, true);
+      document.removeEventListener("pointercancel", handlePointerUp, true);
+      document.removeEventListener("focusin", handleFocusIn);
+    };
   }, [mode]);
   const atMax = maxItems != null && values.length >= maxItems;
 

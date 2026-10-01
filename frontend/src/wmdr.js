@@ -108,7 +108,6 @@ function cleanLink(link, { extended = false } = {}) {
 
 function cleanContact(contact) {
   const organization = trim(contact.organization);
-  if (!organization) return null;
   // Keys are added in schema order so the preview reads like the spec.
   const cleaned = {};
 
@@ -118,7 +117,7 @@ function cleanContact(contact) {
   if (name) cleaned.name = name;
   const position = trim(contact.position);
   if (position) cleaned.position = position;
-  cleaned.organization = organization;
+  if (organization) cleaned.organization = organization;
   const logo = cleanLink(contact.logo, { extended: true });
   if (logo) cleaned.logo = { ...logo, rel: "icon" };
 
@@ -137,7 +136,8 @@ function cleanContact(contact) {
   const roles = cleanStringArray(contact.roles);
   if (roles.length) cleaned.roles = roles;
 
-  return cleaned;
+  // A contact missing its organization is kept so the schema check flags it.
+  return Object.keys(cleaned).length ? cleaned : null;
 }
 
 function cleanTime(time) {

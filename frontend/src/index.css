@@ -169,6 +169,11 @@ h3 {
   margin-bottom: 0.4rem;
 }
 
+.list-row > .btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .concept-detail {
   margin-top: 0.4rem;
 }
