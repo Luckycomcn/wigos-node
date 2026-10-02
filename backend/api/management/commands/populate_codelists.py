@@ -11,11 +11,11 @@ from django.core.management.base import BaseCommand
 # The registry returns SKOS concepts as CSV by default (no Accept header
 # needed).
 #
-# codes.wmo.int's bulk CSV export is unreliable for the four
-# ObservedVariable* collections: it's flaky (some requests return 200 OK
-# with an empty body, others return data) and even when it does return
-# data, it quotes skos:notation (e.g. '104' instead of 104) unlike every
-# other collection's CSV. Two fallbacks are tried in order when the bulk
+# codes.wmo.int's bulk CSV export is unreliable for the ObservedVariable*
+# collections: it's flaky (some requests return 200 OK with an empty body,
+# others return data) and even when it does return data, it quotes numeric
+# skos:notation values (e.g. '104' instead of 104). ObservingMethod* and unit
+# have the same quoting, so they're fetched as turtle too. Two fallbacks are tried in order when the bulk
 # CSV comes back empty:
 #   1. member_codes: the CSV is assembled by fetching each known member
 #      concept individually. Only practical for small collections.
@@ -64,6 +64,61 @@ CODELISTS = {
         "member_codes": None,
         "force_turtle": True,
     },
+    "ObservedVariableEarth": {
+        "url": "https://codes.wmo.int/wmdr/_ObservedVariableEarth",
+        "member_codes": None,
+        "force_turtle": True,
+    },
+    # Most of these 404 at the URL given in the schema's $comment; the
+    # registry serves them under the "_"-prefixed collection instead.
+    "TerritoryName": {
+        "url": "https://codes.wmo.int/wmdr/_TerritoryName",
+        "member_codes": None,
+    },
+    "Geometry": {
+        "url": "https://codes.wmo.int/wmdr/_Geometry",
+        "member_codes": None,
+    },
+    "ProgramAffiliation": {
+        "url": "https://codes.wmo.int/wmdr/_ProgramAffiliation",
+        "member_codes": None,
+    },
+    "ReportingStatus": {
+        "url": "https://codes.wmo.int/wmdr/_ReportingStatus",
+        "member_codes": None,
+    },
+    "ObservingMethodAtmosphere": {
+        "url": "https://codes.wmo.int/wmdr/_ObservingMethodAtmosphere",
+        "member_codes": None,
+        "force_turtle": True,
+    },
+    "ObservingMethodTerrestrial": {
+        "url": "https://codes.wmo.int/wmdr/_ObservingMethodTerrestrial",
+        "member_codes": None,
+        "force_turtle": True,
+    },
+    "ObservingMethodOcean": {
+        "url": "https://codes.wmo.int/wmdr/_ObservingMethodOcean",
+        "member_codes": None,
+        "force_turtle": True,
+    },
+    "InstrumentOperatingStatus": {
+        "url": "https://codes.wmo.int/wmdr/_InstrumentOperatingStatus",
+        "member_codes": None,
+    },
+    "SourceOfObservation": {
+        "url": "https://codes.wmo.int/wmdr/_SourceOfObservation",
+        "member_codes": None,
+    },
+    "ReferenceSurfaceType": {
+        "url": "https://codes.wmo.int/wmdr/_ReferenceSurfaceType",
+        "member_codes": None,
+    },
+    "unit": {
+        "url": "https://codes.wmo.int/wmdr/_unit",
+        "member_codes": None,
+        "force_turtle": True,
+    },
     # ISO3166 is intentionally not listed here: it has no codes.wmo.int
     # registry to refresh from. api/codelists/ISO3166.csv is a static seed
     # (ISO 3166-1 numeric codes, plus the WIGOS-specific "Legacy" issuer
@@ -81,11 +136,21 @@ class Command(BaseCommand):
         "issue never breaks the app."
     )
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "schemes",
+            nargs="*",
+            choices=sorted(CODELISTS),
+            metavar="scheme",
+            help="Only update these codelists (default: all).",
+        )
+
     def handle(self, *args, **options):
         codelists_dir = Path(settings.BASE_DIR) / "api" / "codelists"
         codelists_dir.mkdir(parents=True, exist_ok=True)
 
-        for scheme, config in CODELISTS.items():
+        for scheme in options["schemes"] or CODELISTS:
+            config = CODELISTS[scheme]
             dest = codelists_dir / f"{scheme}.csv"
             self.stdout.write(f"Updating {scheme} from {config['url']}...")
 

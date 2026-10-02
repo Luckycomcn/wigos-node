@@ -42,8 +42,8 @@ const EXTERNAL_ID_FIELDS = [
   { name: "scheme", label: "Scheme", type: "text", placeholder: "Issuing authority, ideally a resolvable URI" },
 ];
 
-const TERRITORY_FIELDS = [
-  { name: "territory", label: "Territory", type: "concept", required: true, placeholder: "TerritoryName notation, e.g. CHE" },
+const territoryFields = (territoryNames) => [
+  { name: "territory", label: "Territory", type: "concept", required: true, options: territoryNames },
   { name: "dateStart", label: "From", type: "date" },
   { name: "dateEnd", label: "To (empty if ongoing)", type: "date" },
 ];
@@ -57,11 +57,15 @@ export default function WmdrForm({ stationId, onSaved, onCancel }) {
   const [facilityTypes, setFacilityTypes] = useState([]);
   const [wmoRegions, setWmoRegions] = useState([]);
   const [issuerCountries, setIssuerCountries] = useState([]);
+  const [territoryNames, setTerritoryNames] = useState([]);
 
   useEffect(() => {
     getCodelist("FacilityType").then(setFacilityTypes).catch(() => setFacilityTypes([]));
     getCodelist("WMORegion").then(setWmoRegions).catch(() => setWmoRegions([]));
     getCodelist("ISO3166").then(setIssuerCountries).catch(() => setIssuerCountries([]));
+    getCodelist("TerritoryName")
+      .then((options) => setTerritoryNames([...options].sort((a, b) => a.label.localeCompare(b.label))))
+      .catch(() => setTerritoryNames([]));
   }, []);
 
   useEffect(() => {
@@ -282,7 +286,7 @@ export default function WmdrForm({ stationId, onSaved, onCancel }) {
               itemLabel="Territory"
               values={form.territories}
               onChange={set("territories")}
-              fields={TERRITORY_FIELDS}
+              fields={territoryFields(territoryNames)}
               itemSummary={(t) => t.territory?.id}
               path={[]}
             />

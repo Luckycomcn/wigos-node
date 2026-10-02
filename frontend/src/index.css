@@ -178,6 +178,68 @@ h3 {
   margin-top: 0.4rem;
 }
 
+.combo {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.combo-list {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 16rem;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0.25rem 0;
+  list-style: none;
+  background: var(--white);
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+}
+
+.combo-group {
+  padding: 0.5rem 0.75rem 0.2rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--gray-500);
+}
+
+.combo-option {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.combo-option.active {
+  background: var(--blue-50);
+}
+
+.combo-option[aria-selected="true"] {
+  font-weight: 600;
+  color: var(--blue-700);
+}
+
+.combo-code {
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  color: var(--gray-500);
+}
+
+.combo-empty {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.9rem;
+  color: var(--gray-500);
+}
+
 .btn {
   border: none;
   border-radius: var(--radius-sm);

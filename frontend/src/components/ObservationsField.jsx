@@ -5,17 +5,52 @@ import { getAtPath, setAtPath, isFieldsetComplete } from "../formPath";
 import { getCodelist } from "../api";
 import { TIME_FIELDS, GEOMETRY_FIELDS } from "../fieldDefs";
 
-const OBSERVED_PROPERTY_CODELISTS = [
-  { scheme: "ObservedVariableAtmosphere", label: "Atmosphere" },
-  { scheme: "ObservedVariableOcean", label: "Ocean" },
-  { scheme: "ObservedVariableTerrestrial", label: "Terrestrial" },
-  { scheme: "ObservedVariableOuterSpace", label: "Outer space" },
-];
+// Codelists (cached by the backend, see populate_codelists) behind each
+// concept field: a scheme name for a single list, or labelled schemes for a
+// field whose concepts come from several lists, shown as option groups.
+const CODELISTS = {
+  observedProperty: [
+    { scheme: "ObservedVariableAtmosphere", label: "Atmosphere" },
+    { scheme: "ObservedVariableOcean", label: "Ocean" },
+    { scheme: "ObservedVariableTerrestrial", label: "Terrestrial" },
+    { scheme: "ObservedVariableOuterSpace", label: "Outer space" },
+    { scheme: "ObservedVariableEarth", label: "Earth" },
+  ],
+  observedGeometry: "Geometry",
+  programAffiliation: "ProgramAffiliation",
+  reportingStatus: "ReportingStatus",
+  observingMethod: [
+    { scheme: "ObservingMethodAtmosphere", label: "Atmosphere" },
+    { scheme: "ObservingMethodOcean", label: "Ocean" },
+    { scheme: "ObservingMethodTerrestrial", label: "Terrestrial" },
+  ],
+  operatingStatus: "InstrumentOperatingStatus",
+  sourceOfObservation: "SourceOfObservation",
+  unit: "unit",
+  referenceSurface: "ReferenceSurfaceType",
+};
+
+const sortByLabel = (options) => [...options].sort((a, b) => a.label.localeCompare(b.label));
+
+function loadCodelist(spec) {
+  if (typeof spec === "string") return getCodelist(spec).then(sortByLabel).catch(() => []);
+  return Promise.all(
+    spec.map(({ scheme, label }) =>
+      getCodelist(scheme)
+        .then((options) => ({ label, options: sortByLabel(options) }))
+        .catch(() => ({ label, options: [] }))
+    )
+  );
+}
+
+// `options` for a single list, `groups` for several.
+const codelistProps = (name, codelists) =>
+  typeof CODELISTS[name] === "string" ? { options: codelists[name] } : { groups: codelists[name] };
+
+const EMPTY_CODELISTS = Object.fromEntries(Object.keys(CODELISTS).map((name) => [name, []]));
 
 // Field names/shapes follow definitions/Observations, Configurations and
-// Instrument in wmo-im/wmdr2 schemas/wmdr2-bundled.json. Concept fields
-// without `groups` take the codelist notation as free text, since those
-// codelists aren't cached by the backend yet.
+// Instrument in wmo-im/wmdr2 schemas/wmdr2-bundled.json.
 
 const INSTRUMENT_FIELDS = [
   { name: "id", label: "Instrument ID", type: "text" },
@@ -23,46 +58,42 @@ const INSTRUMENT_FIELDS = [
   { name: "model", label: "Model", type: "text" },
 ];
 
-const VERTICAL_DISTANCE_FIELDS = [
-  { name: "distances", label: "Distances", type: "array-string", placeholder: "Signed distance from reference surface" },
-  { name: "unit", label: "Unit", type: "concept", placeholder: "e.g. m" },
-  { name: "referenceSurface", label: "Reference surface", type: "concept", placeholder: "e.g. localGroundLevel" },
-];
+function observationFields(codelists) {
+  const concept = (name, label, extra) => ({ name, label, type: "concept", ...codelistProps(name, codelists), ...extra });
 
-const CONFIGURATION_FIELDS = [
-  { name: "id", label: "Configuration ID", type: "text", required: true },
-  { name: "time", label: "Time", type: "object", fields: TIME_FIELDS },
-  { name: "observingMethod", label: "Observing method", type: "concept", placeholder: "ObservingMethod notation" },
-  { name: "operatingStatus", label: "Operating status", type: "concept", placeholder: "e.g. operational" },
-  { name: "sourceOfObservation", label: "Source of observation", type: "concept", placeholder: "e.g. automaticReading" },
-  { name: "geometry", label: "Location", type: "object", fields: GEOMETRY_FIELDS },
-  { name: "instrument", label: "Instrument", type: "object", fields: INSTRUMENT_FIELDS },
-  { name: "instrumentSerialNumber", label: "Instrument serial number", type: "text" },
-  { name: "verticalDistance", label: "Vertical distance", type: "object", fields: VERTICAL_DISTANCE_FIELDS },
-];
+  const verticalDistanceFields = [
+    { name: "distances", label: "Distances", type: "array-string", placeholder: "Signed distance from reference surface" },
+    concept("unit", "Unit"),
+    concept("referenceSurface", "Reference surface"),
+  ];
 
-const PROGRAM_AFFILIATION_FIELDS = [
-  { name: "programAffiliation", label: "Programme/network", type: "concept", required: true, placeholder: "e.g. GOS" },
-  { name: "reportingStatus", label: "Reporting status", type: "concept", placeholder: "e.g. operational" },
-  { name: "dateStart", label: "From", type: "date" },
-  { name: "dateEnd", label: "To (empty if ongoing)", type: "date" },
-];
+  const configurationFields = [
+    { name: "id", label: "Configuration ID", type: "text", required: true },
+    { name: "time", label: "Time", type: "object", fields: TIME_FIELDS },
+    concept("observingMethod", "Observing method"),
+    concept("operatingStatus", "Operating status"),
+    concept("sourceOfObservation", "Source of observation"),
+    { name: "geometry", label: "Location", type: "object", fields: GEOMETRY_FIELDS },
+    { name: "instrument", label: "Instrument", type: "object", fields: INSTRUMENT_FIELDS },
+    { name: "instrumentSerialNumber", label: "Instrument serial number", type: "text" },
+    { name: "verticalDistance", label: "Vertical distance", type: "object", fields: verticalDistanceFields },
+  ];
 
-function observationFields(observedPropertyGroups) {
+  const programAffiliationFields = [
+    concept("programAffiliation", "Programme/network", { required: true }),
+    concept("reportingStatus", "Reporting status"),
+    { name: "dateStart", label: "From", type: "date" },
+    { name: "dateEnd", label: "To (empty if ongoing)", type: "date" },
+  ];
+
   return [
-    {
-      name: "observedProperty",
-      label: "Observed property",
-      type: "concept",
-      required: true,
-      groups: observedPropertyGroups,
-    },
-    { name: "observedGeometry", label: "Observed geometry", type: "concept", placeholder: "e.g. point" },
+    concept("observedProperty", "Observed property", { required: true }),
+    concept("observedGeometry", "Observed geometry"),
     {
       name: "programAffiliations",
       label: "Program affiliation",
       type: "array-object",
-      fields: PROGRAM_AFFILIATION_FIELDS,
+      fields: programAffiliationFields,
       required: true,
       summary: (p) => p.programAffiliation?.title || p.programAffiliation?.id,
     },
@@ -70,7 +101,7 @@ function observationFields(observedPropertyGroups) {
       name: "configurations",
       label: "Configuration",
       type: "array-object",
-      fields: CONFIGURATION_FIELDS,
+      fields: configurationFields,
       required: true,
       summary: (c) => [c.id, [c.instrument?.manufacturer, c.instrument?.model].filter(Boolean).join(" ")].filter(Boolean).join(" – "),
     },
@@ -79,25 +110,20 @@ function observationFields(observedPropertyGroups) {
 
 export default function ObservationsField({ value, onChange }) {
   const [trail, setTrail] = useState([]);
-  const [observedPropertyGroups, setObservedPropertyGroups] = useState([]);
+  const [codelists, setCodelists] = useState(EMPTY_CODELISTS);
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all(
-      OBSERVED_PROPERTY_CODELISTS.map(({ scheme, label }) =>
-        getCodelist(scheme)
-          .then((options) => ({ label, options: [...options].sort((a, b) => a.label.localeCompare(b.label)) }))
-          .catch(() => ({ label, options: [] }))
-      )
-    ).then((groups) => {
-      if (!cancelled) setObservedPropertyGroups(groups);
+    const names = Object.keys(CODELISTS);
+    Promise.all(names.map((name) => loadCodelist(CODELISTS[name]))).then((lists) => {
+      if (!cancelled) setCodelists(Object.fromEntries(names.map((name, i) => [name, lists[i]])));
     });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const fields = observationFields(observedPropertyGroups);
+  const fields = observationFields(codelists);
 
   const push = (path, label, fields) => setTrail((prev) => [...prev, { path, label, fields }]);
   const back = () => setTrail((prev) => prev.slice(0, -1));
