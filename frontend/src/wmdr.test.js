@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { buildWmdrRecord, parseWmdrRecord, parseConcept } from "./wmdr";
+import {
+  buildWmdrRecord,
+  parseWmdrRecord,
+  parseConcept,
+  splitWigosId,
+  joinWigosId,
+  wigosIdsToCheck,
+  duplicateWigosIds,
+} from "./wmdr";
 import { validateWmdrRecord } from "./wmdrSchema";
 // examples/0-20008-0-THE.json from wmo-im/wmdr2.
 import upstreamExample from "./__fixtures__/upstream-example.json";
@@ -140,5 +148,25 @@ describe("parseConcept", () => {
   it("returns null for empty values", () => {
     expect(parseConcept("")).toBeNull();
     expect(parseConcept(null)).toBeNull();
+  });
+});
+
+describe("WIGOS ID helpers", () => {
+  it("round-trips an ID whose local part contains hyphens", () => {
+    expect(joinWigosId(splitWigosId("0-20000-0-AB-12"))).toBe("0-20000-0-AB-12");
+  });
+
+  it("joins an ID with every part cleared to an empty string", () => {
+    expect(joinWigosId({ scheme: "0", issuer: "", issue: "", local: "" })).toBe("");
+    expect(joinWigosId({ scheme: "0", issuer: "20000", issue: "", local: "" })).toBe("0-20000--");
+  });
+
+  it("checks only well-formed IDs the station doesn't already own, once each", () => {
+    const ids = ["0-20000-0-B", "", "0-20000-", "0-20000-0-A", "0-20000-0-B", "0-533-1-OWN"];
+    expect(wigosIdsToCheck(ids, ["0-533-1-OWN"])).toEqual(["0-20000-0-A", "0-20000-0-B"]);
+  });
+
+  it("finds IDs entered more than once, ignoring empty rows", () => {
+    expect(duplicateWigosIds(["0-1-0-A", "", "0-1-0-B", "", "0-1-0-A"])).toEqual(new Set(["0-1-0-A"]));
   });
 });

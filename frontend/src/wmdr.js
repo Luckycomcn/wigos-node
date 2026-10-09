@@ -13,8 +13,31 @@ export function splitWigosId(id) {
   return { scheme: scheme || "0", issuer, issue, local: rest.join("-") };
 }
 
+// Clearing every part gives "" rather than "0---", so an emptied additional
+// ID row is dropped from the record like any other empty list entry.
 export function joinWigosId({ scheme, issuer, issue, local }) {
+  if (!issuer && !issue && !local) return "";
   return [scheme || "0", issuer, issue, local].join("-");
+}
+
+// IDs worth looking up on the server: well-formed, not already belonging to
+// the station being edited, de-duplicated and sorted so the list is stable
+// across renders.
+export function wigosIdsToCheck(ids, ownIds = []) {
+  const own = new Set(ownIds);
+  return [...new Set(ids)].filter((id) => WIGOS_ID_PATTERN.test(id) && !own.has(id)).sort();
+}
+
+// IDs entered more than once across the primary and additional ID fields.
+export function duplicateWigosIds(ids) {
+  const seen = new Set();
+  const duplicates = new Set();
+  for (const id of ids) {
+    if (!id) continue;
+    if (seen.has(id)) duplicates.add(id);
+    seen.add(id);
+  }
+  return duplicates;
 }
 
 const trim = (v) => (v ?? "").toString().trim();
@@ -487,7 +510,7 @@ export function parseWmdrRecord(record) {
     title: properties.title || "",
     description: properties.description || "",
     additionalTitles: properties.additionalTitles?.length ? properties.additionalTitles : [""],
-    additionalIds: properties.additionalIds?.length ? properties.additionalIds : [""],
+    additionalIds: properties.additionalIds ?? [],
     facilityType: parseConcept(properties.facilityType),
     wmoRegion: parseConcept(properties.wmoRegion),
     contacts: (properties.contacts || []).map(parseContact),

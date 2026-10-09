@@ -23,8 +23,9 @@ class ReadOnly(BasePermission):
     def has_permission(self, request, view):
         return request.method in SAFE_METHODS
 
+# Same pattern as "id" and "additionalIds" in schemas/wmdr2-bundled.json (and WIGOS_ID_PATTERN in the frontend).
 def check_wigos_identifier(wigos_identifier):
-    return not (wigos_identifier is None or not re.match(r'^(0|1|2|3)-([1-9][0-9]*)-([0-9]+)-([A-Za-z0-9]+)$', wigos_identifier))
+    return not (wigos_identifier is None or not re.match(r'^(0|1|2|3)-([1-9][0-9]*)-([0-9]+)-([A-Za-z0-9._-]+)$', wigos_identifier))
 
 @api_view(["GET"])
 def health(request):

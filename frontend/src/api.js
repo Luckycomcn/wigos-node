@@ -63,6 +63,19 @@ export async function listMyIssuers() {
   return res.json();
 }
 
+// Returns { [wigosId]: boolean }, true when a station already uses the ID
+// as its primary or one of its additional identifiers.
+export async function checkWigosIdentifiers(ids) {
+  const params = new URLSearchParams(ids.map((id) => ["wigos_identifier", id]));
+  const res = handle401(await fetch(`${API_URL}/api/check_wigosidentifiers/?${params}`, {
+    credentials: "include",
+  }));
+  if (!res.ok) {
+    throw new Error(`API request failed: ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function getCodelist(scheme) {
   const res = await fetch(`${API_URL}/api/codelists/${scheme}.csv`, { credentials: "include" });
   if (!res.ok) {

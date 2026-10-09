@@ -1,14 +1,11 @@
 import { useEffect, useState } from "react";
-import {
-  WIGOS_ID_PATTERN,
-  buildWmdrRecord,
-  parseWmdrRecord,
-  splitWigosId,
-  joinWigosId,
-} from "../wmdr";
+import { WIGOS_ID_PATTERN, buildWmdrRecord, parseWmdrRecord, duplicateWigosIds } from "../wmdr";
 import { validateWmdrRecord } from "../wmdrSchema";
 import { saveStation, getStation, getCodelist } from "../api";
+import { useWigosIdAvailability } from "../useWigosIdAvailability";
 import StringListField from "./StringListField";
+import WigosIdInput, { WigosIdFeedback } from "./WigosIdInput";
+import WigosIdListField from "./WigosIdListField";
 import ContactsField from "./ContactsField";
 import ConceptField from "./ConceptField";
 import ObjectArrayField, { ObjectArrayItemRow } from "./ObjectArrayField";
@@ -25,7 +22,7 @@ const initialState = {
   title: "",
   description: "",
   additionalTitles: [""],
-  additionalIds: [""],
+  additionalIds: [],
   facilityType: null,
   wmoRegion: null,
   contacts: [],
@@ -58,6 +55,8 @@ export default function WmdrForm({ stationId, onSaved, onCancel }) {
   const [wmoRegions, setWmoRegions] = useState([]);
   const [issuerCountries, setIssuerCountries] = useState([]);
   const [territoryNames, setTerritoryNames] = useState([]);
+  // IDs the station had when loaded for editing; they belong to it, so they aren't checked for availability.
+  const [ownIds, setOwnIds] = useState([]);
 
   useEffect(() => {
     getCodelist("FacilityType").then(setFacilityTypes).catch(() => setFacilityTypes([]));
@@ -73,7 +72,9 @@ export default function WmdrForm({ stationId, onSaved, onCancel }) {
     setLoadState({ status: "loading" });
     getStation(stationId)
       .then((record) => {
-        setForm(parseWmdrRecord(record));
+        const parsed = parseWmdrRecord(record);
+        setForm(parsed);
+        setOwnIds([parsed.id, ...parsed.additionalIds].filter(Boolean));
         setLoadState({ status: "success" });
       })
       .catch((err) => setLoadState({ status: "error", error: err.message }));
@@ -82,13 +83,21 @@ export default function WmdrForm({ stationId, onSaved, onCancel }) {
   const set = (field) => (value) => setForm((prev) => ({ ...prev, [field]: value }));
   const setInput = (field) => (e) => set(field)(e.target.value);
 
-  const idParts = splitWigosId(form.id);
-  const setIdPart = (part) => (e) => set("id")(joinWigosId({ ...idParts, [part]: e.target.value }));
+  const allIds = [form.id, ...form.additionalIds];
+  const duplicateIds = duplicateWigosIds(allIds);
+  const idStatusOf = useWigosIdAvailability(allIds, ownIds);
+  // An unavailable or still-unchecked ID blocks saving; a failed check doesn't, as the backend re-checks on save.
+  const idsBlocked = allIds.some(
+    (id) =>
+      (id && !WIGOS_ID_PATTERN.test(id)) ||
+      duplicateIds.has(id) ||
+      ["taken", "checking"].includes(idStatusOf(id))
+  );
 
-  const idValid = form.id === "" || WIGOS_ID_PATTERN.test(form.id);
   const record = buildWmdrRecord(form);
   const schemaErrors = validateWmdrRecord(record);
-  const valid = schemaErrors.length === 0;
+  const schemaValid = schemaErrors.length === 0;
+  const valid = schemaValid && !idsBlocked;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -134,55 +143,28 @@ export default function WmdrForm({ stationId, onSaved, onCancel }) {
         <form onSubmit={handleSubmit}>
           <div className="card">
             <h3>Identification</h3>
-            <div className="field">
-              <label>
-                WIGOS station identifier <span className="required">*</span>
-              </label>
-              <div className="row wigos-id-row">
-                <input
-                  className="field-input"
-                  value={idParts.scheme}
-                  disabled
-                  aria-label="Identifier scheme"
-                  title="Identifier scheme (always 0 for a WIGOS station identifier)"
-                />
-                <select
-                  className="field-input"
-                  value={idParts.issuer}
-                  onChange={setIdPart("issuer")}
+            <div className="wigos-id-box">
+              <div className="field">
+                <label>
+                  WIGOS station identifier <span className="required">*</span>
+                </label>
+                <WigosIdInput
+                  value={form.id}
+                  onChange={set("id")}
+                  issuerCountries={issuerCountries}
                   disabled={isEditing}
-                  aria-label="Issuer ID"
-                >
-                  <option value="">Select a country</option>
-                  {issuerCountries.map((country) => (
-                    <option key={country.code} value={String(Number(country.code))}>
-                      {country.code} — {country.label}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  className="field-input"
-                  value={idParts.issue}
-                  onChange={setIdPart("issue")}
-                  placeholder="Issue number"
-                  disabled={isEditing}
-                  aria-label="Issue number"
                 />
-                <input
-                  className="field-input"
-                  value={idParts.local}
-                  onChange={setIdPart("local")}
-                  placeholder="Local identifier"
-                  disabled={isEditing}
-                  aria-label="Local identifier"
-                />
+                <WigosIdFeedback id={form.id} status={idStatusOf(form.id)} duplicate={duplicateIds.has(form.id)} />
               </div>
-              {!idValid && (
-                <div className="field-error">
-                  Select a country, and enter a numeric issue number and a local identifier
-                  (letters, numbers, &quot;.&quot;, &quot;_&quot; or &quot;-&quot;).
-                </div>
-              )}
+
+              <WigosIdListField
+                label="Additional WIGOS identifiers"
+                values={form.additionalIds}
+                onChange={set("additionalIds")}
+                issuerCountries={issuerCountries}
+                statusOf={idStatusOf}
+                duplicates={duplicateIds}
+              />
             </div>
 
             <div className="row">
@@ -245,7 +227,6 @@ export default function WmdrForm({ stationId, onSaved, onCancel }) {
             </div>
 
             <StringListField label="Additional titles" values={form.additionalTitles} onChange={set("additionalTitles")} />
-            <StringListField label="Additional IDs" values={form.additionalIds} onChange={set("additionalIds")} />
             <ObjectArrayField
               label="External IDs"
               itemLabel="External ID"
@@ -333,7 +314,7 @@ export default function WmdrForm({ stationId, onSaved, onCancel }) {
           </div>
           <div className="card">
             <h3>GeoJSON preview</h3>
-            {valid ? (
+            {schemaValid ? (
               <div className="status-message status-success">Valid against the WMDR2 schema.</div>
             ) : (
               <div className="status-message status-error">

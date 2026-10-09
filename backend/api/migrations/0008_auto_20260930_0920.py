@@ -11,6 +11,10 @@ class Migration(migrations.Migration):
 
 
     operations = [
+        # Joins the values matched by path_text as ",v1,v2," (or '' when nothing
+        # matches) so a whole value can be found with LIKE '%,value,%' without
+        # also matching values it is a prefix or suffix of. See
+        # api.models.additional_wsi_lookup.
         migrations.RunSQL(
             sql="""
             CREATE OR REPLACE FUNCTION join_jsonb_path_array(json_data jsonb, path_text text)
@@ -20,8 +24,11 @@ class Migration(migrations.Migration):
             BEGIN
                 SELECT array_to_string(ARRAY(
                     SELECT jsonb_array_elements_text(jsonb_path_query_array(json_data, path_text::jsonpath))
-                ), ', ') INTO res;
-                RETURN res;
+                ), ',') INTO res;
+                IF res = '' THEN
+                    RETURN '';
+                END IF;
+                RETURN ',' || res || ',';
             END;
             $$ LANGUAGE plpgsql IMMUTABLE STRICT;
             """,

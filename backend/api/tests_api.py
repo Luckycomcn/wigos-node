@@ -35,3 +35,12 @@ class StationAPITestCase(APITestCase):
         response = self.client.get(self.checkwsi_url, {'wigos_identifier': '0-533-1212-12321'})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.json()['0-533-1212-12321'], True)
+
+    def test_check_wigosidentifiers_partial_secondary_identifier(self):
+        """Test that a prefix or suffix of an existing secondary WIGOS identifier is not reported as taken."""
+        self.checkwsi_url = reverse('check_wigosidentifiers')
+        # the test station has additional identifiers 0-51-21-2121 and 0-533-1212-12321
+        partial = ['0-51-21-212', '0-533-1212-1232', '-51-21-2121', '1-2121']
+        response = self.client.get(self.checkwsi_url, {'wigos_identifier': partial})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.json(), {wsi: False for wsi in partial})

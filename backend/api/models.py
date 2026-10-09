@@ -14,7 +14,13 @@ additional_wigos_identifier_expression = parse('$.properties.additionalIds')
 class ExtractAndJoinJson(Func):
     function = 'join_jsonb_path_array'  # Matches the SQL function name exactly
 
-    
+# join_jsonb_path_array stores additional WSIs as ",wsi1,wsi2," (a comma can't
+# appear in a WSI), so a whole WSI is matched by searching for it between
+# separators rather than as a bare substring of a longer one.
+ADDITIONAL_WSI_SEPARATOR = ','
+
+def additional_wsi_lookup(wigos_identifier):
+    return f"{ADDITIONAL_WSI_SEPARATOR}{wigos_identifier}{ADDITIONAL_WSI_SEPARATOR}"
 
 class WIGOSNodeGroup(models.Model):
 
@@ -40,8 +46,11 @@ class WIGOSNodeUser(AbstractUser):
         return self.email
 
 class StationQuerySet(models.QuerySet):
+    def with_additional_wigos_identifier(self, wigos_identifier):
+        return self.filter(additional_wigos_identifiers__contains=additional_wsi_lookup(wigos_identifier))
+
     def check_wigos_identifier(self, wigos_identifier):
-        return self.filter(wigos_identifier=wigos_identifier).exists() or self.filter(additional_wigos_identifiers__contains=wigos_identifier).exists()
+        return self.filter(wigos_identifier=wigos_identifier).exists() or self.with_additional_wigos_identifier(wigos_identifier).exists()
 
 class Station(models.Model):
     objects = StationQuerySet.as_manager()
@@ -68,7 +77,7 @@ class Station(models.Model):
     )
 
     additional_wigos_identifiers = models.GeneratedField(
-        expression=ExtractAndJoinJson(F('wmdrv2'), Value('$.properties.additionalIds')),
+        expression=ExtractAndJoinJson(F('wmdrv2'), Value('$.properties.additionalIds[*]')),
         output_field=models.CharField(max_length=255),
         db_persist=True,
         db_index=True,
@@ -105,7 +114,7 @@ class Station(models.Model):
             if wsi and Station.objects.filter(wigos_identifier=wsi).exclude(pk=self.pk).exists():
                 raise ValueError(f"WIGOS identifier '{wsi}' is already in use in another station")
 
-            if wsi and Station.objects.filter(additional_wigos_identifiers__contains=wsi).exclude(pk=self.pk).exists():
+            if wsi and Station.objects.with_additional_wigos_identifier(wsi).exclude(pk=self.pk).exists():
                 raise ValueError(f"WIGOS identifier '{wsi}' is already in use in additional identifiers in another station")
 
 

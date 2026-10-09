@@ -16,7 +16,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='station',
             name='additional_wigos_identifiers',
-            field=models.GeneratedField(db_index=True, db_persist=True, expression=api.models.ExtractAndJoinJson(models.F('wmdrv2'), models.Value('$.properties.additionalIds')), output_field=models.CharField(max_length=255)),
+            field=models.GeneratedField(db_index=True, db_persist=True, expression=api.models.ExtractAndJoinJson(models.F('wmdrv2'), models.Value('$.properties.additionalIds[*]')), output_field=models.CharField(max_length=255)),
         ),
         migrations.AddField(
             model_name='station',
