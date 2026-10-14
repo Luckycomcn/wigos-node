@@ -45,6 +45,33 @@ export async function getStation(stationId) {
   return data;
 }
 
+// Returns { [stationId]: record } for the given stations; unknown IDs are left out.
+export async function getStations(stationIds) {
+  const params = new URLSearchParams(stationIds.map((id) => ["station_id", id]));
+  const res = handle401(await fetch(`${API_URL}/api/wmdrv2/batch/?${params}`, { credentials: "include" }));
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.detail || `API request failed: ${res.status}`);
+  }
+  return data;
+}
+
+// updates: [{ station_id, wmdrv2 }]. Returns { dry_run, summary, results }
+// with a result per update; one station failing doesn't stop the others.
+export async function saveStationsBatch(updates, { dryRun = false } = {}) {
+  const res = handle401(await fetch(`${API_URL}/api/wmdrv2/batch/`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json", ...csrfHeader() },
+    body: JSON.stringify({ dry_run: dryRun, updates }),
+  }));
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.detail || data.error || `API request failed: ${res.status}`);
+  }
+  return data;
+}
+
 export async function listMyStations() {
   const res = handle401(await fetch(`${API_URL}/api/my_stations/`, { credentials: "include" }));
   if (!res.ok) {

@@ -1,53 +1,9 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import ObjectArrayField, { ObjectArrayItemRow } from "./ObjectArrayField";
 import Dialog from "./Dialog";
 import { getAtPath, setAtPath, isFieldsetComplete } from "../formPath";
-import { getCodelist } from "../api";
+import { codelistProps, useCodelists } from "../codelists";
 import { TIME_FIELDS, GEOMETRY_FIELDS } from "../fieldDefs";
-
-// Codelists (cached by the backend, see populate_codelists) behind each
-// concept field: a scheme name for a single list, or labelled schemes for a
-// field whose concepts come from several lists, shown as option groups.
-const CODELISTS = {
-  observedProperty: [
-    { scheme: "ObservedVariableAtmosphere", label: "Atmosphere" },
-    { scheme: "ObservedVariableOcean", label: "Ocean" },
-    { scheme: "ObservedVariableTerrestrial", label: "Terrestrial" },
-    { scheme: "ObservedVariableOuterSpace", label: "Outer space" },
-    { scheme: "ObservedVariableEarth", label: "Earth" },
-  ],
-  observedGeometry: "Geometry",
-  programAffiliation: "ProgramAffiliation",
-  reportingStatus: "ReportingStatus",
-  observingMethod: [
-    { scheme: "ObservingMethodAtmosphere", label: "Atmosphere" },
-    { scheme: "ObservingMethodOcean", label: "Ocean" },
-    { scheme: "ObservingMethodTerrestrial", label: "Terrestrial" },
-  ],
-  operatingStatus: "InstrumentOperatingStatus",
-  sourceOfObservation: "SourceOfObservation",
-  unit: "unit",
-  referenceSurface: "ReferenceSurfaceType",
-};
-
-const sortByLabel = (options) => [...options].sort((a, b) => a.label.localeCompare(b.label));
-
-function loadCodelist(spec) {
-  if (typeof spec === "string") return getCodelist(spec).then(sortByLabel).catch(() => []);
-  return Promise.all(
-    spec.map(({ scheme, label }) =>
-      getCodelist(scheme)
-        .then((options) => ({ label, options: sortByLabel(options) }))
-        .catch(() => ({ label, options: [] }))
-    )
-  );
-}
-
-// `options` for a single list, `groups` for several.
-const codelistProps = (name, codelists) =>
-  typeof CODELISTS[name] === "string" ? { options: codelists[name] } : { groups: codelists[name] };
-
-const EMPTY_CODELISTS = Object.fromEntries(Object.keys(CODELISTS).map((name) => [name, []]));
 
 // Field names/shapes follow definitions/Observations, Configurations and
 // Instrument in wmo-im/wmdr2 schemas/wmdr2-bundled.json.
@@ -110,18 +66,7 @@ function observationFields(codelists) {
 
 export default function ObservationsField({ value, onChange }) {
   const [trail, setTrail] = useState([]);
-  const [codelists, setCodelists] = useState(EMPTY_CODELISTS);
-
-  useEffect(() => {
-    let cancelled = false;
-    const names = Object.keys(CODELISTS);
-    Promise.all(names.map((name) => loadCodelist(CODELISTS[name]))).then((lists) => {
-      if (!cancelled) setCodelists(Object.fromEntries(names.map((name, i) => [name, lists[i]])));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { codelists } = useCodelists();
 
   const fields = observationFields(codelists);
 

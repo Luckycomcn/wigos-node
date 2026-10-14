@@ -6,3 +6,4 @@ gunicorn==22.0.0
 requests==2.32.3
 jsonpath-ng==1.8.0
 django-guardian==3.4.0
+jsonschema[format-nongpl]==4.26.0

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-export default function Dialog({ open, title, onClose, children }) {
+export default function Dialog({ open, title, onClose, children, wide = false }) {
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e) => {
@@ -14,7 +14,7 @@ export default function Dialog({ open, title, onClose, children }) {
 
   return (
     <div className="dialog-backdrop" onClick={onClose}>
-      <div className="dialog-panel" onClick={(e) => e.stopPropagation()}>
+      <div className={`dialog-panel${wide ? " dialog-panel-wide" : ""}`} onClick={(e) => e.stopPropagation()}>
         <div className="dialog-header">
           <h4>{title}</h4>
           <button type="button" className="dialog-close" onClick={onClose} aria-label="Close">

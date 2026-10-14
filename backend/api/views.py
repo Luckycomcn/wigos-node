@@ -1,11 +1,10 @@
 import logging
 import re
 from pathlib import Path
-from pickle import GET
 
 import django.http
 from django.conf import settings
-from guardian.shortcuts import assign_perm
+from django.db import transaction
 from rest_framework import status
 from rest_framework.decorators import (
     api_view,
@@ -14,7 +13,9 @@ from rest_framework.permissions import SAFE_METHODS, BasePermission, IsAuthentic
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from . import stations
 from .models import Station, WIGOSNodeGroup
+from .stations import StationError
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,7 @@ def geojson(request):
 @api_view(["GET"])
 def my_stations(request):
     my_stations = Station.objects.filter(wmdrv2__isnull=False) # return all stations in the meantime
+    editable = stations.editable_station_ids(request.user)
     return Response([
         {
             "station_id": station.id,
@@ -62,6 +64,7 @@ def my_stations(request):
             "name": station.name,
             "latitude": station.location.y,
             "longitude": station.location.x,
+            "can_edit": station.id in editable,
         }
         for station in my_stations
     ])
@@ -81,10 +84,17 @@ def my_issuer_of_identifiers(request):
     return Response({"issuer_of_identifiers": issuer_identifiers})    
 
 
+def _error_response(error):
+    # 403s keep their historical {"error": ...} shape, everything else {"detail": ...}.
+    body = {"error" if error.status == status.HTTP_403_FORBIDDEN else "detail": error.message}
+    if error.errors:
+        body["errors"] = error.errors
+    return Response(body, status=error.status)
+
+
 class Wmdrv2View(APIView):
     permission_classes = [IsAuthenticated | ReadOnly]
 
- 
     def get(self, request, station_id=None):
 
         if station_id is None:
@@ -113,21 +123,10 @@ class Wmdrv2View(APIView):
         except Station.DoesNotExist:
             return Response({"detail": f"Station {station_id} not found"}, status=404)
 
-        if not request.user.has_perm('change_station', station):
-            return Response({"error": "You do not have permission to change this station."}, status=status.HTTP_403_FORBIDDEN)
-
-        # superusers bypass the per-issuer group check (Django convention)
-        if not request.user.is_superuser:
-            issuer_of_identifiers = [wsi.split('-')[1] for wsi in station.get_wigos_identifiers()]
-            # check that the user is in a group for every issuer of identifier on this station
-            for issuer_id in issuer_of_identifiers:
-                if not WIGOSNodeGroup.objects.filter(issuer_identifier=issuer_id, group__user=request.user).exists():
-                    return Response({"error": f"You do not have permission to update a station for the issuer of identifier {issuer_id}."}, status=status.HTTP_403_FORBIDDEN)
-
-        
-        station.wmdrv2 = request.data # we only need to set the wmdrv2 field, the save method will handle updating index fields
-
-        station.save() # owner is unchanged on update; Station.save() forwards **kwargs to Model.save(), which rejects `owner`
+        try:
+            stations.update_station(request.user, station, request.data)
+        except StationError as e:
+            return _error_response(e)
 
         return Response({"message": f"WMDv2 data for station {station_id} updated successfully."}, status=200)
 
@@ -138,35 +137,89 @@ class Wmdrv2View(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        wmdrv2_data = request.data
-        owner = request.user  # Get the authenticated user making the request
-
-        # Create a new Station instance
-        station = Station(wmdrv2=wmdrv2_data, owner=owner)
-
-        issuer_of_identifiers = [wsi.split('-')[1] for wsi in station.get_wigos_identifiers()]
-
-        # superusers bypass the per-issuer group check (Django convention)
-        if not request.user.is_superuser:
-            # check that the user is in a group for every issuer of identifier on this station
-            for issuer_id in issuer_of_identifiers:
-                if not WIGOSNodeGroup.objects.filter(issuer_identifier=issuer_id, group__user=request.user).exists():
-                    return Response({"error": f"You do not have permission to create a station for the issuer of identifier {issuer_id}."}, status=status.HTTP_403_FORBIDDEN)
-
         try:
-            station.save()  # This will also update the name and location based on the WMDv2 data
-        except ValueError as e:
-            return Response({"detail": str(e)}, status=400)
-
-        # assign permissions (after save so the station has a pk to attach object permissions to)
-        assign_perm('change_station', owner, station)
-
-        for issuer_id in issuer_of_identifiers:
-            node_groups = WIGOSNodeGroup.objects.filter(issuer_identifier=issuer_id)
-            if node_groups.exists():
-                for node_group in node_groups:
-                    assign_perm('change_station', node_group.group, station)
-            else:
-                logger.warning(f"No group found for issuer_identifier {issuer_id}. Station {station.id} will not be assigned to any group for this WSI.")
+            station = stations.create_station(request.user, request.data)
+        except StationError as e:
+            return _error_response(e)
 
         return Response({"message": f"Station {station.id} created successfully.", "station_id": station.id}, status=201)
+
+
+MAX_BATCH_UPDATES = 500
+
+
+def _parse_station_id(value):
+    # bool is an int subclass; reject it along with anything non-integer.
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return None
+
+
+class Wmdrv2BatchView(APIView):
+    """Reads and edits many existing stations at once. Never creates stations."""
+
+    permission_classes = [IsAuthenticated | ReadOnly]
+
+    def get(self, request):
+        """?station_id=1&station_id=2 -> { "1": <wmdrv2>, "2": <wmdrv2> }.
+        Unknown IDs are left out."""
+        raw_ids = request.query_params.getlist("station_id")
+        ids = [_parse_station_id(raw) for raw in raw_ids]
+        if not ids or None in ids:
+            return Response({"detail": "Provide one or more numeric station_id parameters."}, status=400)
+        if len(ids) > MAX_BATCH_UPDATES:
+            return Response({"detail": f"At most {MAX_BATCH_UPDATES} stations can be read at once."}, status=400)
+        return Response({str(station.id): station.wmdrv2 for station in Station.objects.filter(id__in=ids)})
+
+    def post(self, request):
+        """Body: { "dry_run": bool, "updates": [{ "station_id": int, "wmdrv2": {...} }] }.
+
+        Every update runs in its own savepoint inside one transaction: a failing
+        update is rolled back alone and later updates see the earlier ones (so
+        the same WIGOS ID given to two stations in one batch is caught). A dry
+        run rolls everything back at the end."""
+        body = request.data if isinstance(request.data, dict) else {}
+        updates = body.get("updates")
+        dry_run = body.get("dry_run", False)
+        if not isinstance(updates, list) or not isinstance(dry_run, bool):
+            return Response({"detail": "Expected { \"dry_run\": bool, \"updates\": [...] }."}, status=400)
+        if len(updates) > MAX_BATCH_UPDATES:
+            return Response({"detail": f"At most {MAX_BATCH_UPDATES} updates are allowed per request."}, status=400)
+
+        results = []
+        with transaction.atomic():
+            for index, update in enumerate(updates):
+                results.append(self._apply(request.user, index, update))
+            if dry_run:
+                transaction.set_rollback(True)
+
+        summary = {"ok": sum(r["status"] == "ok" for r in results)}
+        summary["error"] = len(results) - summary["ok"]
+        return Response({"dry_run": dry_run, "summary": summary, "results": results})
+
+    def _apply(self, user, index, update):
+        update = update if isinstance(update, dict) else {}
+        station_id = _parse_station_id(update.get("station_id"))
+        wmdrv2 = update.get("wmdrv2")
+        result = {"index": index, "station_id": station_id, "wsi": None}
+        try:
+            if station_id is None:
+                raise StationError("A numeric station_id is required. Batch operations never create stations.")
+            try:
+                station = Station.objects.select_for_update().get(id=station_id)
+            except Station.DoesNotExist:
+                raise StationError(f"Station {station_id} not found.", status=404)
+            result["wsi"] = station.wigos_identifier
+            with transaction.atomic():  # savepoint: a failure only undoes this update
+                stations.update_station(user, station, wmdrv2)
+            result["wsi"] = wmdrv2.get("id")
+            result["status"] = "ok"
+        except StationError as e:
+            result.update(status="error", message=e.message)
+            if e.errors:
+                result["errors"] = e.errors
+        return result
