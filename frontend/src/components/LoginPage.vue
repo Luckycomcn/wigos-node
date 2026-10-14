@@ -44,10 +44,6 @@ async function handleSubmit() {
       />
 
       <v-btn type="submit" color="primary" :loading="busy" :disabled="!username || !password">Sign in</v-btn>
-
-      <p class="mt-3 text-body-2">
-        Or use the <a href="/api/auth/login/?next=/">Django login page</a>.
-      </p>
     </v-form>
   </v-card>
 </template>

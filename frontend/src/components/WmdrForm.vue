@@ -125,9 +125,19 @@ const submitLabel = computed(() => (isEditing ? "Save changes" : "Save WMDR reco
 </script>
 
 <template>
-  <v-btn class="mb-4" variant="text" color="secondary" prepend-icon="mdi-chevron-left" @click="emit('cancel')">
+  <v-btn
+    class="back-button"
+    color="primary"
+    variant="flat"
+    elevation="4"
+    rounded="pill"
+    prepend-icon="mdi-chevron-left"
+    @click="emit('cancel')"
+  >
     Back to stations
   </v-btn>
+  <!-- Keeps the floating button from covering the top of the form before scrolling. -->
+  <div class="back-button-spacer" />
 
   <v-card v-if="isEditing && loadState.status === 'loading'" class="pa-6">Loading station...</v-card>
   <v-alert v-else-if="isEditing && loadState.status === 'error'" type="error" variant="tonal">
@@ -279,6 +289,18 @@ const submitLabel = computed(() => (isEditing ? "Save changes" : "Save WMDR reco
 </template>
 
 <style scoped>
+/* Stays in the top-left corner, below the 88px app bar, while the form scrolls. */
+.back-button {
+  position: fixed;
+  top: 104px;
+  left: 16px;
+  z-index: 5;
+}
+
+.back-button-spacer {
+  height: 52px;
+}
+
 /* Groups the primary and additional WIGOS identifiers. */
 .wigos-id-box {
   margin-bottom: 1rem;
