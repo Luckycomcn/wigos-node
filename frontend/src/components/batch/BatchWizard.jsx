@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { getStations, saveStationsBatch } from "../../api";
-import { useCodelists } from "../../codelists";
+import { useCodelists } from "../../useCodelists";
 import { blockingCellCount, changedColumns, diffRecord, splitList } from "../../batch/common";
 import { idsInRows, ownIdsInRows, rowNote } from "../../batch/wigosIds";
 import { duplicateWigosIds } from "../../wmdr";

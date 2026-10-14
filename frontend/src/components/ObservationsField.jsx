@@ -2,7 +2,8 @@ import { useState } from "react";
 import ObjectArrayField, { ObjectArrayItemRow } from "./ObjectArrayField";
 import Dialog from "./Dialog";
 import { getAtPath, setAtPath, isFieldsetComplete } from "../formPath";
-import { codelistProps, useCodelists } from "../codelists";
+import { codelistProps } from "../codelists";
+import { useCodelists } from "../useCodelists";
 import { TIME_FIELDS, GEOMETRY_FIELDS } from "../fieldDefs";
 
 // Field names/shapes follow definitions/Observations, Configurations and
