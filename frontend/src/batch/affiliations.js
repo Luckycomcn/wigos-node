@@ -5,6 +5,7 @@ import {
   conceptForCell,
   dateCell,
   datesFromCells,
+  findChoices,
   makeRow,
   observationAliases,
   observedPropertyLabel,
@@ -16,14 +17,27 @@ import { codelistOptions } from "../codelists";
 
 // Programme affiliations: one row per affiliation of one observation.
 //
-// An affiliation is identified by its programme and start date: leaving a
-// programme and joining it again later gives two affiliations. Both are
-// therefore locked on existing rows and only set on rows being added.
+// A row is identified by the station's WIGOS ID, the observed property and
+// the programme. The start date only tells apart the periods of a programme
+// the observation left and joined again. Programme and start date are
+// locked on existing rows and only set on rows being added.
+//
+// Added rows can move to another observation of the same station (the
+// observed property is a dropdown of the station's observations), but this
+// grid never adds observations: one made from an affiliation row would have
+// no configuration, which makes the record invalid.
+
+const observedProperty = {
+  ...KEY_COLUMNS.observedProperty,
+  // The station's observations, for an added row.
+  choices: (row) => row.observationChoices || [],
+  choiceError: "Not an observation of this station",
+};
 
 export const columns = [
   KEY_COLUMNS.wigosId,
   KEY_COLUMNS.stationName,
-  KEY_COLUMNS.observedProperty,
+  observedProperty,
   {
     key: "program_affiliation",
     label: "Programme/network",
@@ -38,13 +52,23 @@ export const columns = [
   { key: "date_end", label: "To (empty if ongoing)", kind: "date", width: 120 },
 ];
 
-// A file row is matched to a grid row on these columns. A row with an
-// unknown programme/start for a known station and observation becomes a new
-// affiliation (see sheetIO.mergeSheet).
-export const importKeys = ["wigos_id", "observed_property", "program_affiliation", "date_start"];
-export const importParentKeys = ["wigos_id", "observed_property"];
+// A file row is matched to a grid row on these columns; when several rows
+// match (periods of one programme), the start date picks one. A row of a
+// known station that matches none becomes a new affiliation, if its observed
+// property is one of the station's observations (see sheetIO.mergeSheet).
+export const importKeys = ["wigos_id", "observed_property", "program_affiliation"];
+export const importPreferKeys = ["date_start"];
+export const importParentKeys = ["wigos_id"];
 
 const observationsOf = (record) => record.properties?.observations || [];
+
+function observationChoicesOf(record) {
+  return observationsOf(record).map((observation, obsIndex) => ({
+    obsIndex,
+    label: observedPropertyLabel(observation),
+    aliases: observationAliases(observation).observed_property,
+  }));
+}
 
 function affiliationCells(affiliation) {
   const [start, end] = affiliation?.dates || [];
@@ -59,6 +83,7 @@ function affiliationCells(affiliation) {
 export function toRows(entries) {
   return entries.flatMap((entry) => {
     const station = stationKeys(entry);
+    const observationChoices = observationChoicesOf(entry.record);
     return observationsOf(entry.record).flatMap((observation, obsIndex) => {
       const keys = { ...station, observed_property: observedPropertyLabel(observation) };
       return (observation.programAffiliations || []).map((affiliation, itemIndex) =>
@@ -66,6 +91,7 @@ export function toRows(entries) {
           obsIndex,
           itemIndex,
           aliases: observationAliases(observation),
+          observationChoices,
         })
       );
     });
@@ -76,15 +102,26 @@ const obsKey = (row) => `${row.stationId}:${row.obsIndex}`;
 
 // An empty affiliation row for the observation of `template`.
 export function newRowFor(template, rows) {
-  const key = obsKey(template);
-  const n = rows.filter((r) => r.isNew && obsKey(r) === key).length + 1;
+  // Counted per station: an added row may move to another observation.
+  const n = rows.filter((r) => r.isNew && r.stationId === template.stationId).length + 1;
   const { wigos_id, station_name, observed_property } = template.cells;
-  return makeRow(`${key}:new${n}`, template.stationId, { wigos_id, station_name, observed_property }, affiliationCells(null), {
+  return makeRow(`${obsKey(template)}:new${n}`, template.stationId, { wigos_id, station_name, observed_property }, affiliationCells(null), {
     obsIndex: template.obsIndex,
     itemIndex: null,
     isNew: true,
     aliases: template.aliases,
+    observationChoices: template.observationChoices,
   });
+}
+
+// Points an added row at the observation its observed property cell names
+// (its own one first, when two observations share a label). Returns null
+// when the station has no such observation.
+export function syncNewRow(row) {
+  const matches = findChoices(observedProperty, row, row.cells.observed_property);
+  const choice = matches.find((c) => c.obsIndex === row.obsIndex) || matches[0];
+  if (!choice) return null;
+  return { ...row, obsIndex: choice.obsIndex, aliases: { observed_property: choice.aliases } };
 }
 
 // Adds an empty affiliation row under each observation that has a selected

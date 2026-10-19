@@ -21,8 +21,23 @@ export const KEY_COLUMNS = {
 export const isEditable = (column) => column.kind !== "key";
 
 // A column with `lockedOnExisting` identifies existing rows (e.g. the
-// programme of an affiliation) and can only be set on rows being added.
-export const isCellEditable = (column, row) => isEditable(column) && !(column.lockedOnExisting && !row?.isNew);
+// programme of an affiliation) and can only be set on rows being added. A
+// key column with `choices(row)` can be set on added rows too, to one of
+// those choices only (e.g. an observation the station already has).
+export const isCellEditable = (column, row) =>
+  column.kind === "key"
+    ? !!(column.choices && row?.isNew)
+    : !(column.lockedOnExisting && !row?.isNew);
+
+// The choices of `column` a cell names, by label or alias (case-insensitive):
+// [{ label, aliases, ... }].
+export function findChoices(column, row, text) {
+  const value = (text ?? "").trim().toLowerCase();
+  if (!value || !column.choices) return [];
+  return column.choices(row).filter((choice) =>
+    [choice.label, ...(choice.aliases || [])].some((candidate) => String(candidate).toLowerCase() === value)
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Lists
@@ -88,9 +103,14 @@ export function codelistLabel(options, text) {
 }
 
 // Normalizes a typed, pasted or imported value: codelist labels become
-// notations; everything is trimmed.
-export function normalizeCell(column, text, codelists) {
+// notations, a choice's alias becomes its label (needs the `row`);
+// everything is trimmed.
+export function normalizeCell(column, text, codelists, row) {
   const value = (text ?? "").toString().trim();
+  if (column.choices && row) return findChoices(column, row, value)[0]?.label ?? value;
+  if (column.kind === "date" && value && !DATE_PATTERNS.some((p) => p.test(value))) {
+    return spreadsheetDateToIso(value, row?.original?.[column.key]) ?? value;
+  }
   if (column.kind === "codelist" && value) {
     const opt = findCodelistOption(codelistOptions(column.codelist, codelists), value);
     return opt ? opt.code : value;
@@ -110,6 +130,82 @@ const DATE_PATTERNS = [
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/,
   /^T\d{2}(:\d{2})?(:\d{2})?(?:\.\d+)?Z$/,
 ];
+
+const pad = (n) => String(n).padStart(2, "0");
+const isoDate = (y, m, d) => `${y}-${pad(m)}-${pad(d)}`;
+const isValidDate = (y, m, d) => m >= 1 && m <= 12 && d >= 1 && d <= new Date(Date.UTC(y, m, 0)).getUTCDate();
+
+// A date as a spreadsheet program rewrites it when it opens a CSV (Excel
+// turns 2026-08-23 into 8/23/2026 or 23.08.2026, by locale): D/M/Y or M/D/Y
+// with "/", "." or "-", a two-digit year (Excel's rule: 00-29 is 20xx), an
+// optional midnight time; or Y/M/D. Returns YYYY-MM-DD, or null when it
+// isn't such a date. When both day/month orders fit (8/7/2026), the one
+// that gives `original` wins; otherwise it's ambiguous and null.
+export function spreadsheetDateToIso(text, original) {
+  const value = (text ?? "").trim().replace(/\s+0?0:00(:00)?$/, "");
+  const ymd = value.match(/^(\d{4})[./-](\d{1,2})[./-](\d{1,2})$/);
+  if (ymd) {
+    const [y, m, d] = ymd.slice(1).map(Number);
+    return isValidDate(y, m, d) ? isoDate(y, m, d) : null;
+  }
+  const parts = value.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2}|\d{4})$/);
+  if (!parts) return null;
+  const [a, b] = [Number(parts[1]), Number(parts[2])];
+  let y = Number(parts[3]);
+  if (parts[3].length === 2) y += y < 30 ? 2000 : 1900;
+  const readings = [...new Set([[a, b], [b, a]].filter(([m, d]) => isValidDate(y, m, d)).map(([m, d]) => isoDate(y, m, d)))];
+  if (readings.length === 1) return readings[0];
+  return readings.find((iso) => iso === original) ?? null;
+}
+
+// Short month names in the locales Excel users here are likely to have.
+const MONTHS = (() => {
+  const names = new Map();
+  ["en", "es", "fr", "de", "it", "pt", "nl"].forEach((locale) => {
+    const format = new Intl.DateTimeFormat(locale, { month: "short", timeZone: "UTC" });
+    for (let m = 1; m <= 12; m++) {
+      names.set(format.format(new Date(Date.UTC(2000, m - 1, 1))).toLowerCase().replace(/\.$/, ""), m);
+    }
+  });
+  return names;
+})();
+
+// The day and month numbers a value shown as a date has (12-Dec, Dec-12,
+// 12/12/2026, 12.12.26), in no particular order, or null.
+function shownDateNumbers(text) {
+  let parts = text.match(/^(\d{1,2})[-\s]([^\d\s.-]{3,5})\.?(?:[-\s]\d{2,4})?$/);
+  if (parts && MONTHS.has(parts[2].toLowerCase())) return [Number(parts[1]), MONTHS.get(parts[2].toLowerCase())];
+  parts = text.match(/^([^\d\s.-]{3,5})\.?[-\s](\d{1,2})$/);
+  if (parts && MONTHS.has(parts[1].toLowerCase())) return [Number(parts[2]), MONTHS.get(parts[1].toLowerCase())];
+  parts = text.match(/^(\d{1,2})[./-](\d{1,2})[./-]\d{2,4}$/);
+  return parts ? [Number(parts[1]), Number(parts[2])] : null;
+}
+
+// Whether `shown` is how a spreadsheet program rewrites `original` when it
+// opens a CSV, rather than an edit: a number with its digits cut
+// (3.21321E+11) or leading/trailing zeros dropped, or a text it took for a
+// date (12-12 becomes 12-Dec).
+export function isSpreadsheetRendering(original, shown) {
+  const a = (original ?? "").trim();
+  const b = (shown ?? "").trim();
+  if (!a || !b || a === b) return false;
+  if (isNumber(a) && isNumber(b)) {
+    if (Number(a) === Number(b)) return true;
+    // Scientific notation keeps as many significant digits as it shows.
+    const mantissa = b.match(/^-?(\d+(?:\.\d+)?)e[+-]?\d+$/i);
+    if (mantissa) {
+      const digits = Math.min(mantissa[1].replace(".", "").length, 15);
+      return Number(a).toPrecision(digits) === Number(b).toPrecision(digits);
+    }
+    // Excel keeps the first 15 digits of a long number and zeroes the rest.
+    return /^\d{16,}$/.test(a) && b.length === a.length && b.startsWith(a.slice(0, 15)) && /^0+$/.test(b.slice(15));
+  }
+  const numbers = a.match(/^(\d{1,2})[-/.](\d{1,2})$/);
+  const shownNumbers = numbers && shownDateNumbers(b);
+  if (!shownNumbers) return false;
+  const sorted = (pair) => [...pair].sort((x, y) => x - y).join(",");
+  return sorted([Number(numbers[1]), Number(numbers[2])]) === sorted(shownNumbers);
+}
 
 const isNumber = (text) => text.trim() !== "" && !Number.isNaN(Number(text));
 
@@ -140,6 +236,9 @@ export function cellError(column, text, codelists) {
   }
 }
 
+const choiceError = (column, row, value) =>
+  !value.trim() ? "Required" : findChoices(column, row, value).length ? null : column.choiceError || "Not one of the choices";
+
 // ---------------------------------------------------------------------------
 // Rows
 
@@ -153,11 +252,16 @@ export const changedColumns = (row, columns) =>
 export function cellState(row, column, codelists, cellStatus) {
   const value = row.cells[column.key] ?? "";
   const extra = cellStatus?.(row, column) || {};
+  const editable = isCellEditable(column, row);
   return {
     value,
     changed: isEditable(column) && isCellChanged(row, column.key),
-    editable: isCellEditable(column, row),
-    error: isEditable(column) ? cellError(column, value, codelists) || extra.error || null : null,
+    editable,
+    error: isEditable(column)
+      ? cellError(column, value, codelists) || extra.error || null
+      : editable && column.choices
+        ? choiceError(column, row, value)
+        : null,
     hint: extra.hint || null,
   };
 }

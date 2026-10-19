@@ -3,6 +3,7 @@ import { ref } from "vue";
 import LoginPage from "./components/LoginPage.vue";
 import StationsList from "./components/StationsList.vue";
 import WmdrForm from "./components/WmdrForm.vue";
+import BatchWizard from "./components/batch/BatchWizard.vue";
 import { useAuth } from "./composables/useAuth";
 
 const { status, user, setUser, logout } = useAuth();
@@ -53,13 +54,13 @@ async function handleLogout() {
             @saved="view = { mode: 'list' }"
             @cancel="view = { mode: 'list' }"
           />
-          <!-- Views are ported to Vue one by one (docs/vue-vuetify-migration-plan.md). -->
-          <v-alert v-else type="info" variant="tonal">
-            The {{ view.mode }} view hasn't been migrated to Vue yet.
-            <template #append>
-              <v-btn variant="text" @click="view = { mode: 'list' }">Back to stations</v-btn>
-            </template>
-          </v-alert>
+          <!-- Only the stations that failed stay selected after applying. -->
+          <BatchWizard
+            v-else-if="view.mode === 'batch'"
+            :station-ids="view.stationIds"
+            @applied="(failedIds) => (selected = new Set(failedIds))"
+            @close="view = { mode: 'list' }"
+          />
         </template>
       </v-container>
     </v-main>

@@ -4,8 +4,19 @@ import * as affiliations from "./affiliations";
 import * as configurations from "./configurations";
 import * as wigosIds from "./wigosIds";
 import { OPERATIONS } from "./operations";
-import { blockingCellCount, cellError, diffRecord, isCellEditable, normalizeCell, resultsToCsv, sameConcept } from "./common";
-import { mergeSheet, sheetTable } from "./sheetIO";
+import {
+  blockingCellCount,
+  cellError,
+  cellState,
+  diffRecord,
+  isCellEditable,
+  isSpreadsheetRendering,
+  normalizeCell,
+  resultsToCsv,
+  sameConcept,
+  spreadsheetDateToIso,
+} from "./common";
+import { mergeSheet, pastedTable, sheetTable, workbookTable } from "./sheetIO";
 import { parseCsvRows, toCsv } from "../csv";
 import { validateWmdrRecord } from "../wmdrSchema";
 // examples/0-20008-0-THE.json from wmo-im/wmdr2.
@@ -278,6 +289,50 @@ describe("WIGOS identifiers", () => {
   });
 });
 
+describe("spreadsheet dates", () => {
+  it.each([
+    ["8/23/2026", undefined, "2026-08-23"],
+    ["23.08.2026", undefined, "2026-08-23"],
+    ["23-8-26", undefined, "2026-08-23"],
+    ["8/23/2026 0:00", undefined, "2026-08-23"],
+    ["2026/8/23", undefined, "2026-08-23"],
+    ["8/7/2026", "2026-08-07", "2026-08-07"],
+    ["8/7/2026", "2026-07-08", "2026-07-08"],
+    ["8/7/2026", "2020-01-01", null],
+    ["2/30/2026", undefined, null],
+    ["Aug 2026", undefined, null],
+  ])("%s (was %s) -> %s", (text, original, expected) => {
+    expect(spreadsheetDateToIso(text, original)).toBe(expected);
+  });
+
+  it.each([
+    ["321321123456", "3.21321E+11", true],
+    ["321321123456", "3.21322E+11", false],
+    ["1234567890123456789", "1234567890123450000", true],
+    ["0042", "42", true],
+    ["46.20", "46.2", true],
+    ["12-12", "12-Dec", true],
+    ["1-2", "2-Jan", true],
+    ["3-4", "4-mar", true],
+    ["12-12", "dic-12", true],
+    ["12-12", "12/12/2026", true],
+    ["12-12", "11-Dec", false],
+    ["HMP155", "HMP156", false],
+    ["", "3.2E+11", false],
+  ])("%s shown as %s is a spreadsheet rendering: %s", (original, shown, expected) => {
+    expect(isSpreadsheetRendering(original, shown)).toBe(expected);
+  });
+
+  it("normalizes date cells, but leaves an ambiguous date for the user to fix", () => {
+    const column = { key: "d", kind: "date" };
+    expect(normalizeCell(column, "8/23/2026", CODELISTS)).toBe("2026-08-23");
+    expect(normalizeCell(column, "8/7/2026", CODELISTS, { original: { d: "2026-07-08" } })).toBe("2026-07-08");
+    expect(normalizeCell(column, "8/7/2026", CODELISTS)).toBe("8/7/2026");
+    expect(cellError(column, "8/7/2026", CODELISTS)).toMatch(/YYYY-MM-DD/);
+    expect(normalizeCell(column, "2026-08", CODELISTS)).toBe("2026-08");
+  });
+});
+
 describe("cells", () => {
   const status = affiliations.columns.find((c) => c.key === "reporting_status");
 
@@ -349,7 +404,8 @@ describe("import", () => {
       matched: 1,
       added: 0,
       changedCells: 1,
-      unmatched: ["0-20008-0-XXX / 12164 / GALION / 2008-01-01"],
+      restored: 0,
+      unmatched: ["0-20008-0-XXX / 12164 / GALION"],
       unknownHeaders: ["colour"],
       error: null,
     });
@@ -370,6 +426,143 @@ describe("import", () => {
     const result = affiliations.applyRows(entries, next, CODELISTS)[0].record.properties.observations[0].programAffiliations;
     expect(result).toHaveLength(4);
     expect(result[3]).toMatchObject({ programAffiliation: { id: "GBON" }, dates: ["2026-01-01", ".."] });
+  });
+
+  it("matches pasted whole rows like an import: edits existing rows, adds new programme periods", () => {
+    const line = (cells) => affiliations.columns.map((column) => cells[column.key] ?? "").join("\t");
+    const text = `${[
+      line({ ...rows[1].cells, station_name: "renamed", reporting_status: "closed" }),
+      line({ ...rows[1].cells, program_affiliation: "GBON", date_start: "2026-01-01", date_end: "" }),
+    ].join("\r\n")}\r\n`;
+    const { rows: next, report } = mergeSheet(pastedTable(text, affiliations), affiliations, rows, CODELISTS);
+
+    expect(report).toMatchObject({ matched: 1, added: 1, changedCells: 1, unmatched: [] });
+    expect(next[1].cells).toEqual({ ...rows[1].cells, reporting_status: "closed" });
+    expect(next[3]).toMatchObject({
+      isNew: true,
+      cells: { program_affiliation: "GBON", date_start: "2026-01-01", reporting_status: "operational", date_end: "" },
+    });
+  });
+
+  it("takes a pasted block with a header naming the key columns as whole rows", () => {
+    const text = "wigos_id\tobserved_property\tProgramme/network\tFrom\tReporting status\n0-20008-0-THE\t12164\tGALION\t2008-01-01\tclosed";
+    const { rows: next, report } = mergeSheet(pastedTable(text, affiliations), affiliations, rows, CODELISTS);
+    expect(report).toMatchObject({ matched: 1, changedCells: 1 });
+    expect(next[1].cells.reporting_status).toBe("closed");
+  });
+
+  it("leaves a partial pasted block to the cell-by-cell paste", () => {
+    expect(pastedTable("closed\t2030-01-01\nclosed\t", affiliations)).toBeNull();
+    expect(pastedTable("x\ty\tz", { columns: [{ key: "x", label: "X" }, { key: "y", label: "Y" }, { key: "z", label: "Z" }] })).toBeNull();
+  });
+
+  it("identifies a row by WIGOS ID, observed property and programme; the locked start date isn't changed", () => {
+    const table = [header, ["0-20008-0-THE", "", "12164", "GALION", "2030-01-01", "closed", ""]];
+    const { rows: next, report } = mergeSheet(table, affiliations, rows, CODELISTS);
+    expect(report).toMatchObject({ matched: 1, added: 0, changedCells: 1, unmatched: [] });
+    expect(next[1].cells).toEqual({ ...rows[1].cells, reporting_status: "closed" });
+  });
+
+  it("picks between periods of one programme by start date, and adds a period that matches none", () => {
+    const record = structuredClone(upstreamExample);
+    const [, galion] = record.properties.observations[0].programAffiliations;
+    record.properties.observations[0].programAffiliations.push({ ...galion, dates: ["2025-01-01", ".."] });
+    const periodRows = affiliations.toRows(entriesOf(record));
+    const table = [
+      header,
+      ["0-20008-0-THE", "", "12164", "GALION", "2025-01-01", "closed", ""],
+      ["0-20008-0-THE", "", "12164", "GALION", "2030-01-01", "operational", ""],
+    ];
+    const { rows: next, report } = mergeSheet(table, affiliations, periodRows, CODELISTS);
+    expect(report).toMatchObject({ matched: 1, added: 1, unmatched: [] });
+    expect(next[3].cells).toMatchObject({ date_start: "2025-01-01", reporting_status: "closed" });
+    expect(next[1].cells).toEqual(periodRows[1].cells);
+    expect(next[4]).toMatchObject({ isNew: true, cells: { program_affiliation: "GALION", date_start: "2030-01-01" } });
+  });
+
+  it("adds rows only to the station's own observations, never a new observation", () => {
+    const record = structuredClone(upstreamExample);
+    record.properties.observations.push({
+      ...structuredClone(record.properties.observations[0]),
+      observedProperty: { id: "224", title: "Air temperature" },
+      programAffiliations: [{ programAffiliation: { id: "GOS" }, dates: ["2020-01-01", ".."] }],
+    });
+    const twoEntries = entriesOf(record);
+    const twoRows = affiliations.toRows(twoEntries);
+    const table = [
+      header,
+      // By notation; the grid shows the title.
+      ["0-20008-0-THE", "", "224", "GBON", "2026-01-01", "operational", ""],
+      ["0-20008-0-THE", "", "999", "GBON", "2026-01-01", "operational", ""],
+    ];
+    const { rows: next, report } = mergeSheet(table, affiliations, twoRows, CODELISTS);
+    expect(report).toMatchObject({ matched: 0, added: 1, unmatched: ["0-20008-0-THE / 999 / GBON (not an observation of this station)"] });
+    expect(next.map((row) => row.cells.observed_property)).toEqual(["12164", "12164", "12164", "Air temperature", "Air temperature"]);
+    expect(next[4]).toMatchObject({ isNew: true, obsIndex: 1 });
+
+    const result = affiliations.applyRows(twoEntries, next, CODELISTS)[0].record.properties.observations;
+    expect(result).toHaveLength(2);
+    expect(result[1].programAffiliations.map((a) => a.programAffiliation.id)).toEqual(["GOS", "GBON"]);
+  });
+
+  it("lets an added row move to another observation of the station only", () => {
+    const record = structuredClone(upstreamExample);
+    record.properties.observations.push({ ...structuredClone(record.properties.observations[0]), observedProperty: { id: "224" } });
+    const { added } = affiliations.addRows(affiliations.toRows(entriesOf(record)), new Set(["1:0:0"]));
+    const property = columnOf(affiliations, "observed_property");
+
+    expect(isCellEditable(property, rows[0])).toBe(false);
+    expect(isCellEditable(property, added[0])).toBe(true);
+    expect(property.choices(added[0]).map((choice) => choice.label)).toEqual(["12164", "224"]);
+
+    const moved = affiliations.syncNewRow({ ...added[0], cells: { ...added[0].cells, observed_property: "224" } });
+    expect(moved.obsIndex).toBe(1);
+    expect(affiliations.syncNewRow({ ...added[0], cells: { ...added[0].cells, observed_property: "999" } })).toBeNull();
+    expect(cellState({ ...added[0], cells: { ...added[0].cells, observed_property: "999" } }, property, CODELISTS).error).toBe(
+      "Not an observation of this station"
+    );
+  });
+
+  it("reads dates back that Excel rewrote in a CSV, keeping unchanged ones as they were", () => {
+    const record = structuredClone(allFields);
+    record.properties.observations[0].configurations[0].time.interval = ["2026-08-07", ".."];
+    const cfgRows = configurations.toRows(entriesOf(record));
+    const table = sheetTable(configurations.columns, cfgRows);
+    const start = table[0].indexOf("interval_start");
+    const end = table[0].indexOf("interval_end");
+    // As Excel saves them (US format): the unchanged start, which could also
+    // read as 8 July, and the one date the user edited.
+    table[1][start] = "8/7/2026";
+    table[1][end] = "8/23/2026";
+    const { rows: next, report } = mergeSheet(parseCsvRows(toCsv(table)), configurations, cfgRows, CODELISTS);
+    expect(report).toMatchObject({ matched: cfgRows.length, changedCells: 1 });
+    expect(next[0].cells.interval_start).toBe("2026-08-07");
+    expect(next[0].cells.interval_end).toBe("2026-08-23");
+  });
+
+  it("keeps values Excel reformatted in a CSV, and still takes real edits", () => {
+    const record = structuredClone(allFields);
+    const configuration = record.properties.observations[0].configurations[0];
+    configuration.instrument = { ...configuration.instrument, id: "321321123456", model: "12-12" };
+    const cfgRows = configurations.toRows(entriesOf(record));
+    const table = sheetTable(configurations.columns, cfgRows);
+    const col = (key) => table[0].indexOf(key);
+    table[1][col("instrument_id")] = "3.21321E+11";
+    table[1][col("instrument_model")] = "12-Dec";
+    table[1][col("instrument_manufacturer")] = "SUTRON";
+    const { rows: next, report } = mergeSheet(parseCsvRows(toCsv(table)), configurations, cfgRows, CODELISTS);
+
+    expect(report).toMatchObject({ changedCells: 1, restored: 2 });
+    expect(next[0].cells).toMatchObject({ instrument_id: "321321123456", instrument_model: "12-12", instrument_manufacturer: "SUTRON" });
+  });
+
+  it("reads Excel date cells as ISO dates", () => {
+    const serial = (Date.UTC(2026, 7, 23) - Date.UTC(1899, 11, 30)) / 86400000;
+    const sheet = XLSX.utils.aoa_to_sheet([["From"], [{ t: "n", v: serial, z: "m/d/yy" }], [{ t: "n", v: serial + 0.5, z: "m/d/yy h:mm" }], ["text"]]);
+    const book = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(book, sheet, "Batch");
+    const reread = XLSX.read(XLSX.write(book, { type: "array", bookType: "xlsx" }), { cellNF: true });
+    expect(workbookTable(XLSX, reread)).toEqual([["From"], ["2026-08-23"], ["2026-08-23T12:00:00Z"], ["text"]]);
   });
 
   it("needs the key columns", () => {
