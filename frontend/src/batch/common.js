@@ -296,7 +296,7 @@ export const observationAliases = (observation) => ({
   observed_property: [conceptCell(observation.observedProperty), observation.observedProperty?.url].filter(Boolean),
 });
 
-// `id` is internal (React keys, selection); files identify rows by their
+// `id` is internal (list keys, selection); files identify rows by their
 // key columns instead, see sheetIO.mergeSheet.
 export function makeRow(id, stationId, keys, values, extra = {}) {
   const cells = { ...keys, ...values };

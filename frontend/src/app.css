@@ -1,6 +1,25 @@
-/* Styles shared by the Vue components. Vuetify's CSS is in cascade layers,
-   so these (unlayered) rules win over it. Avoid the old index.css class names
-   that style descendants (.field, .card, .row): they'd restyle Vuetify inputs. */
+/* Styles shared by the components. Vuetify's CSS is in cascade layers, so
+   these (unlayered) rules win over it. Keep them to classes the components
+   use: a generic name that styles descendants (.field, .card, .row) would
+   restyle Vuetify's inner elements. */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #eff6ff;
+  color: #0f172a;
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0 0 0.5rem;
+  color: #1e3a8a;
+}
 
 .section-title {
   margin: 0 0 1rem;

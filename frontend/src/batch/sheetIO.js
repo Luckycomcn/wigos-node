@@ -222,7 +222,3 @@ export function pastedTable(text, sheet) {
   if (lines.every((cells) => cells.length === columns.length)) return [columns.map((column) => column.key), ...lines];
   return null;
 }
-
-export async function importSheet(file, sheet, rows, codelists) {
-  return mergeSheet(await readSheet(file), sheet, rows, codelists);
-}

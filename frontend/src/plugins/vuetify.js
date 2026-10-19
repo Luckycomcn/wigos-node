@@ -8,8 +8,8 @@ import { createVuetify } from "vuetify";
 // Longer entries are cut off with an ellipsis.
 const DROPDOWN_MENU = { width: 420 };
 
-// Colours follow the palette in index.css. Vuetify's own CSS sits in cascade
-// layers, so index.css (unlayered) still wins wherever both style an element.
+// Colours follow the app's blue palette (see app.css). Vuetify's own CSS sits
+// in cascade layers, so app.css and scoped styles (unlayered) win over it.
 export default createVuetify({
   theme: {
     // Vuetify 4 defaults to "system"; the app has no dark design yet.
