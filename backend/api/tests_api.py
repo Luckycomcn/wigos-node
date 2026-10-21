@@ -1,4 +1,6 @@
+import base64
 import copy
+import hashlib
 import json
 
 from django.urls import reverse
@@ -6,6 +8,7 @@ from guardian.shortcuts import assign_perm
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from . import wnm
 from .models import Station, WIGOSNodeGroup, WIGOSNodeUser
 
 
@@ -50,6 +53,19 @@ class StationAPITestCase(APITestCase):
         response = self.client.get(self.checkwsi_url, {'wigos_identifier': partial})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.json(), {wsi: False for wsi in partial})
+
+    def test_wmdrv2_response_matches_wnm_integrity(self):
+        """The bytes served at a WNM's link hash to its properties.integrity value."""
+        station = Station.objects.get(wigos_identifier='0-20000-0-123456')
+        message = wnm.create_station_wnm(station)
+        # ask for indentation: the API must answer compact JSON regardless
+        response = self.client.get(reverse('wmdrv2', kwargs={'station_id': station.pk}),
+                                   HTTP_ACCEPT='application/json; indent=4')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        digest = base64.b64encode(hashlib.sha512(response.content).digest()).decode('ascii')
+        self.assertEqual(digest, message['properties']['integrity']['value'])
+        self.assertEqual(len(response.content), message['links'][0]['length'])
 
 
 with open('/test_data/test_wmdrv2.json') as f:

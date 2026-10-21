@@ -100,6 +100,10 @@ CSRF_TRUSTED_ORIGINS = os.environ.get(
     "CSRF_TRUSTED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
 ).split(",")
 
+# WIS2 Notification Messages (api/wnm.py): the public origin the record links
+# point at.
+WNM_BASE_URL = os.environ.get("WNM_BASE_URL", "http://localhost:8000")
+
 REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.AllowAny",
