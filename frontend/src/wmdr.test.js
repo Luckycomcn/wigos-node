@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildWmdrRecord,
   parseWmdrRecord,
+  withNodeFields,
   parseConcept,
   splitWigosId,
   joinWigosId,
@@ -16,7 +17,16 @@ import allFields from "./__fixtures__/all-fields.json";
 // A record saved before the move to the wmdr2-bundled schema.
 import legacyRecord from "./__fixtures__/legacy-record.json";
 
-const roundTrip = (record) => buildWmdrRecord(parseWmdrRecord(record));
+const NOW = new Date("2026-10-21T12:00:00.000Z");
+const ORIGIN = "https://node.example.org";
+const roundTrip = (record) => buildWmdrRecord(parseWmdrRecord(record), { now: NOW, origin: ORIGIN });
+const selfLink = (wsi) => ({ rel: "self", href: `${ORIGIN}/api/wmdrv2/wsi/${wsi}`, type: "application/geo+json" });
+// The builder sets `updated` to the time the record is built and adds the self link.
+const withNodeFieldsNow = (record) => ({
+  ...record,
+  properties: { ...record.properties, updated: NOW.toISOString() },
+  links: [selfLink(record.id), ...record.links],
+});
 
 // The builder always writes milliseconds ("...00.000Z"); upstream omits them.
 function withMilliseconds(value) {
@@ -36,9 +46,11 @@ describe.each([
     expect(validateWmdrRecord(record)).toEqual([]);
   });
 
-  it("round-trips through the form without losing or adding anything", () => {
+  it("round-trips through the form without losing or adding anything but the node's fields", () => {
     const rebuilt = roundTrip(record);
-    expect(rebuilt).toEqual(withMilliseconds(record));
+    expect(rebuilt).toEqual(withNodeFieldsNow(withMilliseconds(record)));
+    // A second round trip keeps one self link, not two.
+    expect(roundTrip(rebuilt)).toEqual(rebuilt);
     expect(validateWmdrRecord(rebuilt)).toEqual([]);
   });
 });
@@ -73,7 +85,7 @@ describe("legacy records", () => {
     expect(validateWmdrRecord(rebuilt)).toEqual([
       "observations[1].configurations[1].time.resolution has an invalid format",
       "observations[1].configurations[1].verticalDistance.unit is required",
-      "links[1].rel is required",
+      "links[2].rel is required",
     ]);
   });
 });
@@ -84,7 +96,6 @@ describe("buildWmdrRecord", () => {
       "id has an invalid format",
       "geometry.longitude must be number",
       "geometry.latitude must be number",
-      "created is required",
       "contacts needs at least 1 item(s)",
       "observations needs at least 1 item(s)",
       "links needs at least 1 item(s)",
@@ -105,7 +116,7 @@ describe("buildWmdrRecord", () => {
     form.links.push({ href: "", rel: "about", type: "", hreflang: "", title: "", length: "" });
     const record = buildWmdrRecord(form);
     expect(record.properties.contacts).toHaveLength(1);
-    expect(record.links).toHaveLength(1);
+    expect(record.links.map((link) => link.rel)).toEqual(["self", "about"]);
   });
 
   it("keeps half-filled concepts so a missing id is reported", () => {
@@ -124,6 +135,60 @@ describe("buildWmdrRecord", () => {
     const form = parseWmdrRecord(allFields);
     form.time = { ...form.time, intervalStart: "", intervalEnd: "2021" };
     expect(buildWmdrRecord(form).time.interval).toEqual(["..", "2021"]);
+  });
+
+  it("sets created for a new record and keeps the stored one", () => {
+    expect(roundTrip({}).properties.created).toBe(NOW.toISOString());
+    expect(roundTrip(allFields).properties.created).toBe(allFields.properties.created);
+  });
+
+  it("sets updated to the build time, whatever was stored", () => {
+    expect(roundTrip(allFields).properties.updated).toBe(NOW.toISOString());
+  });
+
+  it("assigns an id to a configuration without one and keeps a stored one", () => {
+    const form = parseWmdrRecord(allFields);
+    const [configuration] = form.observations[0].configurations;
+    form.observations[0].configurations.push({ ...configuration, id: "" });
+    const [kept, assigned] = buildWmdrRecord(form).properties.observations[0].configurations;
+    expect(kept.id).toBe("c1");
+    expect(assigned.id).toMatch(/\S/);
+    expect(assigned.id).not.toBe("c1");
+  });
+
+  it("keeps a stored configuration that has nothing but its id", () => {
+    const stored = structuredClone(allFields);
+    stored.properties.observations[0].configurations = [{ id: "Vue", time: null }];
+    const rebuilt = roundTrip(stored);
+    expect(rebuilt.properties.observations[0].configurations).toEqual([{ id: "Vue", time: null }]);
+    expect(validateWmdrRecord(rebuilt)).toEqual([]);
+  });
+
+  it("drops a configuration left empty instead of giving it an id", () => {
+    const form = parseWmdrRecord(allFields);
+    form.observations[0].configurations.push(parseWmdrRecord({ properties: { observations: [{ configurations: [{}] }] } }).observations[0].configurations[0]);
+    expect(buildWmdrRecord(form).properties.observations[0].configurations).toHaveLength(1);
+  });
+
+  it("links to the record by its primary WIGOS ID and hides the self link from the form", () => {
+    const stored = { ...allFields, links: [{ rel: "self", href: "https://old.example.org/x" }, ...allFields.links] };
+    const form = parseWmdrRecord(stored);
+    expect(form.links.map((link) => link.rel)).toEqual(["about"]);
+    expect(buildWmdrRecord(form, { origin: ORIGIN }).links[0]).toEqual(selfLink("0-20000-0-12345"));
+  });
+
+  it("adds no self link before the WIGOS ID is entered", () => {
+    expect(roundTrip({}).links).toEqual([]);
+  });
+});
+
+describe("withNodeFields", () => {
+  it("sets updated and replaces the self link after a renumbering", () => {
+    const stored = roundTrip(allFields);
+    const renumbered = withNodeFields({ ...stored, id: "0-20000-0-NEW" }, { now: new Date("2027-01-01T00:00:00.000Z"), origin: ORIGIN });
+    expect(renumbered.properties.updated).toBe("2027-01-01T00:00:00.000Z");
+    expect(renumbered.links.filter((link) => link.rel === "self")).toEqual([selfLink("0-20000-0-NEW")]);
+    expect(renumbered.links.slice(1)).toEqual(stored.links.slice(1));
   });
 
   it("always sets the logo's rel to icon", () => {

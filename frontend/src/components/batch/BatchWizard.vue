@@ -5,6 +5,7 @@ import { useCodelists } from "../../composables/useCodelists";
 import { useWigosIdStatus } from "../../composables/useWigosIdStatus";
 import { blockingCellCount, changedColumns, diffRecord } from "../../batch/common";
 import { validateWmdrRecord } from "../../wmdrSchema";
+import { withNodeFields } from "../../wmdr";
 import OperationPicker from "./OperationPicker.vue";
 import SheetGrid from "./SheetGrid.vue";
 import PreviewDialog from "./PreviewDialog.vue";
@@ -73,17 +74,21 @@ const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 async function openPreview() {
   const updated = sheet.value.applyRows(entries.value, rows.value, codelists.value);
   const changes = [];
+  const now = new Date();
   updated.forEach((entry, i) => {
     const before = entries.value[i].record;
+    // The diff shows the user's edits; `updated` and the self link are then set
+    // on changed records only, so untouched stations stay out of the batch.
     const diff = diffRecord(before, entry.record);
     if (!diff.length) return;
+    const record = withNodeFields(entry.record, { now });
     changes.push({
       stationId: entry.stationId,
       name: before.properties?.title,
       wsi: before.id,
-      record: entry.record,
+      record,
       diff,
-      schemaErrors: validateWmdrRecord(entry.record),
+      schemaErrors: validateWmdrRecord(record),
     });
   });
   const unchangedCount = entries.value.length - changes.length;

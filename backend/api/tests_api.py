@@ -54,6 +54,22 @@ class StationAPITestCase(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.json(), {wsi: False for wsi in partial})
 
+    def test_wmdrv2_by_wsi(self):
+        """A record is found by its primary or an additional WIGOS identifier."""
+        station = Station.objects.get(wigos_identifier='0-20000-0-12345')
+        for wsi in ['0-20000-0-12345', '0-533-1212-12321']:
+            response = self.client.get(reverse('wmdrv2-wsi', kwargs={'wsi': wsi}))
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            self.assertEqual(response.json(), station.wmdrv2)
+
+    def test_wmdrv2_by_wsi_unknown(self):
+        response = self.client.get(reverse('wmdrv2-wsi', kwargs={'wsi': '0-20000-0-unknown'}))
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_wmdrv2_by_wsi_is_read_only(self):
+        response = self.client.put(reverse('wmdrv2-wsi', kwargs={'wsi': '0-20000-0-12345'}), {}, format='json')
+        self.assertIn(response.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_405_METHOD_NOT_ALLOWED))
+
     def test_wmdrv2_response_matches_wnm_integrity(self):
         """The bytes served at a WNM's link hash to its properties.integrity value."""
         station = Station.objects.get(wigos_identifier='0-20000-0-123456')

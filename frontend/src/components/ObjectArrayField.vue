@@ -10,8 +10,18 @@ function emptyValueForField(field) {
   return [];
 }
 
+// An interval field edits two keys of the item: its `start` and `end`.
 function emptyItem(fields) {
-  return Object.fromEntries(fields.map((field) => [field.name, emptyValueForField(field)]));
+  return Object.fromEntries(
+    fields.flatMap((field) =>
+      field.type === "interval"
+        ? [
+            [field.start, ""],
+            [field.end, ""],
+          ]
+        : [[field.name, emptyValueForField(field)]]
+    )
+  );
 }
 </script>
 

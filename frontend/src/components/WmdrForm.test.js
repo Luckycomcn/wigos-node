@@ -66,6 +66,8 @@ describe("WmdrForm", () => {
     expect(preview().properties.title).toBe("Station A");
     expect(preview().geometry.coordinates[1]).toBe(46.2);
     expect(wrapper.text()).toContain("Not yet valid against the WMDR2 schema");
+    // The station's time has no resolution; configurations keep theirs.
+    expect(() => inputByLabel("Resolution")).toThrow();
     expect(vueWarnings()).toEqual([]);
   });
 
@@ -75,9 +77,31 @@ describe("WmdrForm", () => {
     await flushPromises();
 
     expect(getStation).toHaveBeenCalledWith(7);
-    expect(preview()).toEqual(buildWmdrRecord(parseWmdrRecord(allFields)));
+    // `updated` is the time each record was built, so it's compared apart.
+    const shown = preview();
+    const expected = buildWmdrRecord(parseWmdrRecord(allFields), { now: new Date(shown.properties.updated) });
+    expect(shown).toEqual(expected);
     // The primary ID can't change while editing.
     expect(inputByLabel("Local identifier").attributes("disabled")).toBeDefined();
+    expect(vueWarnings()).toEqual([]);
+  });
+
+  it("edits the station's interval with a read-back and an Ongoing box", async () => {
+    mountForm();
+    await flushPromises();
+
+    await inputByLabel("From").setValue("2020-01");
+    expect(wrapper.text()).toContain("January 2020");
+    expect(preview().time.interval).toEqual(["2020-01", ".."]);
+
+    await inputByLabel("To").setValue("2019");
+    expect(wrapper.text()).toContain("The end is before the start");
+
+    const ongoing = wrapper.findAll(".v-checkbox").find((box) => box.text() === "Ongoing");
+    await ongoing.find("input").setValue(true);
+    expect(inputByLabel("To").attributes("disabled")).toBeDefined();
+    expect(preview().time.interval).toEqual(["2020-01", ".."]);
+    expect(wrapper.text()).toContain("Since January 2020, ongoing");
     expect(vueWarnings()).toEqual([]);
   });
 

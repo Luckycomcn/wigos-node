@@ -42,6 +42,12 @@ export function duplicateWigosIds(ids) {
 
 const trim = (v) => (v ?? "").toString().trim();
 
+// Configuration ids are assigned here, not typed in. crypto.randomUUID needs a
+// secure context (https or localhost), hence the fallback.
+function newId() {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function cleanStringArray(arr) {
   return (arr || []).map(trim).filter(Boolean);
 }
@@ -228,8 +234,6 @@ function cleanVerticalDistance(verticalDistance) {
 
 function cleanConfiguration(configuration) {
   const cleaned = {};
-  const id = trim(configuration.id);
-  if (id) cleaned.id = id;
   // `time` is required on a configuration but may be null.
   cleaned.time = cleanTime(configuration.time);
   const geometry = cleanGeometry(configuration.geometry);
@@ -244,7 +248,12 @@ function cleanConfiguration(configuration) {
   if (instrumentSerialNumber) cleaned.instrumentSerialNumber = instrumentSerialNumber;
   const verticalDistance = cleanVerticalDistance(configuration.verticalDistance);
   if (verticalDistance) cleaned.verticalDistance = verticalDistance;
-  return Object.keys(cleaned).length > 1 || cleaned.time ? cleaned : null;
+  // A stored id is kept so the batch import can match the configuration, and
+  // a stored configuration with nothing but its id stays a configuration. Only
+  // one added in the form and left empty is dropped.
+  const id = trim(configuration.id);
+  if (!id && Object.keys(cleaned).length === 1 && !cleaned.time) return null;
+  return { id: id || newId(), ...cleaned };
 }
 
 function cleanProgramAffiliation(entry) {
@@ -271,15 +280,30 @@ function cleanObservation(observation) {
   return isEmpty ? null : cleaned;
 }
 
-export function buildWmdrRecord(form) {
+// The node's lookup of a record by WIGOS ID (backend: wmdrv2-wsi).
+export const SELF_LINK_PATH = "/api/wmdrv2/wsi/";
+
+// The fields this node sets on every record it saves, from the form and from
+// the batch wizard alike: `updated` (now) and a `self` link to the record by
+// its primary WIGOS ID, replacing any stored one (the ID may have changed).
+export function withNodeFields(record, { now = new Date(), origin = globalThis.location?.origin ?? "" } = {}) {
+  const links = (record.links || []).filter((link) => link?.rel !== "self");
+  const self = record.id
+    ? [{ rel: "self", href: `${origin}${SELF_LINK_PATH}${encodeURIComponent(record.id)}`, type: "application/geo+json" }]
+    : [];
+  return { ...record, properties: { ...record.properties, updated: now.toISOString() }, links: [...self, ...links] };
+}
+
+// `created` keeps the stored value (now for a new record); withNodeFields sets
+// `updated` and the self link. None of them is edited in the form.
+export function buildWmdrRecord(form, { now = new Date(), origin } = {}) {
   const properties = {
     type: "facility",
     title: trim(form.title),
     contacts: (form.contacts || []).map(cleanContact).filter(Boolean),
     observations: (form.observations || []).map(cleanObservation).filter(Boolean),
   };
-  const created = isoDateTime(form.created);
-  if (created) properties.created = created;
+  properties.created = isoDateTime(form.created) || now.toISOString();
 
   if (trim(form.description)) properties.description = trim(form.description);
   if (cleanStringArray(form.additionalTitles).length) properties.additionalTitles = cleanStringArray(form.additionalTitles);
@@ -288,8 +312,6 @@ export function buildWmdrRecord(form) {
   if (facilityType) properties.facilityType = facilityType;
   const wmoRegion = cleanConcept(form.wmoRegion);
   if (wmoRegion) properties.wmoRegion = wmoRegion;
-  const updated = isoDateTime(form.updated);
-  if (updated) properties.updated = updated;
   const territories = (form.territories || []).map(cleanTerritory).filter(Boolean);
   if (territories.length) properties.territories = territories;
   const externalIds = (form.externalIds || []).map(cleanExternalId).filter(Boolean);
@@ -311,7 +333,7 @@ export function buildWmdrRecord(form) {
   if (time) record.time = time;
   record.properties = properties;
   record.links = (form.links || []).map((link) => cleanLink(link)).filter(Boolean);
-  return record;
+  return withNodeFields(record, { now, origin });
 }
 
 // ---------------------------------------------------------------------------
@@ -330,7 +352,8 @@ function toDatetimeLocal(iso) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-const fromOpenDate = (value) => (value && value !== ".." ? value : "");
+// An open bound stays ".." in the form, so its Unknown/Ongoing box is ticked.
+const fromOpenDate = (value) => value || "";
 
 function parseDates(dates) {
   const [start, end] = dates || [];
@@ -514,14 +537,15 @@ export function parseWmdrRecord(record) {
     facilityType: parseConcept(properties.facilityType),
     wmoRegion: parseConcept(properties.wmoRegion),
     contacts: (properties.contacts || []).map(parseContact),
-    created: toDatetimeLocal(properties.created),
-    updated: toDatetimeLocal(properties.updated),
+    // Kept as stored: it isn't shown in the form, only written back.
+    created: properties.created || "",
     territories: (properties.territories || []).map((t) => ({
       territory: parseConcept(t.territory),
       ...parseDates(t.dates),
     })),
     externalIds: (properties.externalIds || []).map((e) => ({ scheme: e.scheme || "", value: e.value || "" })),
     observations,
-    links: (record.links || []).map(parseLink),
+    // The self link isn't edited: buildWmdrRecord writes it.
+    links: (record.links || []).filter((link) => link?.rel !== "self").map(parseLink),
   };
 }

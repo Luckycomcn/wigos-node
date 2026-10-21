@@ -12,8 +12,8 @@ const initialState = () => ({
   facilityType: null,
   wmoRegion: null,
   contacts: [],
+  // Not shown: buildWmdrRecord sets created (for a new record) and updated.
   created: "",
-  updated: "",
   territories: [],
   externalIds: [],
   observations: [],
@@ -25,10 +25,11 @@ const EXTERNAL_ID_FIELDS = [
   { name: "scheme", label: "Scheme", type: "text", placeholder: "Issuing authority, ideally a resolvable URI" },
 ];
 
+import { DATES_FIELD } from "../fieldDefs";
+
 const territoryFields = (territoryNames) => [
   { name: "territory", label: "Territory", type: "concept", required: true, options: territoryNames },
-  { name: "dateStart", label: "From", type: "date" },
-  { name: "dateEnd", label: "To (empty if ongoing)", type: "date" },
+  DATES_FIELD,
 ];
 
 const externalIdSummary = (e) => [e.scheme, e.value].filter(Boolean).join(": ");
@@ -42,7 +43,7 @@ import { WIGOS_ID_PATTERN, buildWmdrRecord, parseWmdrRecord, duplicateWigosIds }
 import { validateWmdrRecord } from "../wmdrSchema";
 import { saveStation, getStation, getCodelist } from "../api";
 import { useWigosIdAvailability } from "../composables/useWigosIdAvailability";
-import { TIME_FIELDS, LINK_FIELDS } from "../fieldDefs";
+import { STATION_TIME_FIELDS, LINK_FIELDS } from "../fieldDefs";
 import StringListField from "./StringListField.vue";
 import WigosIdInput from "./WigosIdInput.vue";
 import WigosIdFeedback from "./WigosIdFeedback.vue";
@@ -185,7 +186,7 @@ const submitLabel = computed(() => (isEditing ? "Save changes" : "Save WMDR reco
 
           <div class="nested-card">
             <div class="nested-card-header"><span>Time</span></div>
-            <ObjectArrayItemRow v-model:item="form.time" :fields="TIME_FIELDS" :path="['time']" />
+            <ObjectArrayItemRow v-model:item="form.time" :fields="STATION_TIME_FIELDS" :path="['time']" />
           </div>
         </v-card>
 
@@ -215,15 +216,6 @@ const submitLabel = computed(() => (isEditing ? "Save changes" : "Save WMDR reco
 
           <ContactsField v-model="form.contacts" />
 
-          <v-row density="compact" class="mb-3">
-            <v-col cols="12" sm="6">
-              <v-text-field v-model="form.created" label="Created *" type="datetime-local" />
-            </v-col>
-            <v-col cols="12" sm="6">
-              <v-text-field v-model="form.updated" label="Updated" type="datetime-local" />
-            </v-col>
-          </v-row>
-
           <ObjectArrayField
             v-model="form.territories"
             label="Territories"
@@ -244,8 +236,8 @@ const submitLabel = computed(() => (isEditing ? "Save changes" : "Save WMDR reco
             :fields="LINK_FIELDS"
             :item-summary="linkSummary"
             :path="[]"
-            required
           />
+          <p class="text-caption text-medium-emphasis">A link to this record on this node is added automatically.</p>
         </v-card>
 
         <div class="d-flex ga-3 align-center">

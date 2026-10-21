@@ -1,6 +1,7 @@
 <script>
 import { codelistProps } from "../codelists";
-import { TIME_FIELDS, GEOMETRY_FIELDS } from "../fieldDefs";
+import { TIME_FIELDS, GEOMETRY_FIELDS, DATES_FIELD } from "../fieldDefs";
+import { describeInterval } from "../interval";
 
 // Field names/shapes follow definitions/Observations, Configurations and
 // Instrument in wmo-im/wmdr2 schemas/wmdr2-bundled.json.
@@ -20,8 +21,8 @@ function observationFields(codelists) {
     concept("referenceSurface", "Reference surface"),
   ];
 
+  // No id field: buildWmdrRecord assigns one to a configuration without it.
   const configurationFields = [
-    { name: "id", label: "Configuration ID", type: "text", required: true },
     { name: "time", label: "Time", type: "object", fields: TIME_FIELDS },
     concept("observingMethod", "Observing method"),
     concept("operatingStatus", "Operating status"),
@@ -35,8 +36,7 @@ function observationFields(codelists) {
   const programAffiliationFields = [
     concept("programAffiliation", "Programme/network", { required: true }),
     concept("reportingStatus", "Reporting status"),
-    { name: "dateStart", label: "From", type: "date" },
-    { name: "dateEnd", label: "To (empty if ongoing)", type: "date" },
+    DATES_FIELD,
   ];
 
   return [
@@ -56,7 +56,9 @@ function observationFields(codelists) {
       type: "array-object",
       fields: configurationFields,
       required: true,
-      summary: (c) => [c.id, [c.instrument?.manufacturer, c.instrument?.model].filter(Boolean).join(" ")].filter(Boolean).join(" – "),
+      summary: (c) =>
+        [c.instrument?.manufacturer, c.instrument?.model].filter(Boolean).join(" ") ||
+        describeInterval(c.time?.intervalStart, c.time?.intervalEnd),
     },
   ];
 }

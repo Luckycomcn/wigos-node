@@ -1,15 +1,22 @@
 // Form field definitions shared between the station, observation and contact
 // editors. Shapes follow wmo-im/wmdr2 schemas/wmdr2-bundled.json.
 
-// Interval bounds are free text because the schema accepts dates, year-months,
-// years, UTC timestamps and times of day; an empty bound is written as "..".
+// An interval field (IntervalField) edits two keys of its item, `start` and
+// `end`. Time intervals accept years, months, days, UTC timestamps and times of
+// day; an open bound is ".." (and an empty one is written as ".." too).
 export const TIME_FIELDS = [
   { name: "date", label: "Date", type: "date" },
   { name: "timestamp", label: "Timestamp", type: "datetime-local" },
-  { name: "intervalStart", label: "Interval start (empty if open)", type: "text", placeholder: "e.g. 2020-01-31, 2020-01, 2020" },
-  { name: "intervalEnd", label: "Interval end (empty if ongoing)", type: "text", placeholder: "e.g. 2020-01-31, 2020-01, 2020" },
+  { name: "interval", label: "Interval", type: "interval", start: "intervalStart", end: "intervalEnd" },
   { name: "resolution", label: "Resolution", type: "text", placeholder: "ISO 8601 duration, e.g. P1D, PT1H" },
 ];
+
+// The station's own time has no resolution (wmo-im/wmdr2 PR #41 disallows it
+// there); configurations keep it. A stored value is still written back.
+export const STATION_TIME_FIELDS = TIME_FIELDS.filter((field) => field.name !== "resolution");
+
+// Programme affiliation and territory `dates`: full days only, per the schema.
+export const DATES_FIELD = { name: "dates", label: "Dates", type: "interval", start: "dateStart", end: "dateEnd", daysOnly: true };
 
 export const GEOMETRY_FIELDS = [
   { name: "latitude", label: "Latitude", type: "text" },

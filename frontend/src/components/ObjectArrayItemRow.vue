@@ -1,5 +1,6 @@
 <script setup>
 import ConceptField from "./ConceptField.vue";
+import IntervalField from "./IntervalField.vue";
 import StringListField from "./StringListField.vue";
 import ObjectArrayField from "./ObjectArrayField.vue";
 
@@ -42,6 +43,15 @@ const fieldLabel = (field) => (field.required ? `${field.label} *` : field.label
       :required="field.required"
       :placeholder="field.placeholder"
       @update:model-value="(value) => setField(field.name, value)"
+    />
+    <IntervalField
+      v-else-if="field.type === 'interval'"
+      :label="field.label"
+      :days-only="field.daysOnly"
+      :start="item[field.start] || ''"
+      :end="item[field.end] || ''"
+      @update:start="(value) => setField(field.start, value)"
+      @update:end="(value) => setField(field.end, value)"
     />
     <StringListField
       v-else-if="field.type === 'array-string'"

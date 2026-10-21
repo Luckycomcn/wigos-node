@@ -148,6 +148,23 @@ class Wmdrv2View(APIView):
         return Response({"message": f"Station {station.id} created successfully.", "station_id": station.id}, status=201)
 
 
+class Wmdrv2ByWsiView(APIView):
+    """A record by any of its WIGOS identifiers, primary or additional. Each
+    record's `self` link points here with its primary identifier."""
+
+    permission_classes = [ReadOnly]
+    renderer_classes = [CompactJSONRenderer]
+
+    def get(self, request, wsi):
+        station = (
+            Station.objects.filter(wigos_identifier=wsi).first()
+            or Station.objects.with_additional_wigos_identifier(wsi).first()
+        )
+        if station is None:
+            return Response({"detail": f"No station with WIGOS identifier {wsi}"}, status=404)
+        return Response(station.wmdrv2)
+
+
 MAX_BATCH_UPDATES = 500
 
 
