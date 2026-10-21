@@ -117,6 +117,23 @@ describe("WmdrForm", () => {
     expect(vueWarnings()).toEqual([]);
   });
 
+  it("summarises configurations, including one with nothing but its id", async () => {
+    const record = structuredClone(allFields);
+    record.properties.observations[0].configurations.push({ id: "Vue", time: null });
+    getStation.mockResolvedValue(record);
+    mountForm({ stationId: 7 });
+    await flushPromises();
+
+    const observationCard = wrapper
+      .findAll(".nested-card")
+      .find((card) => card.find(".nested-card-header span").text() === "224");
+    await observationCard.findAll("button").find((b) => b.text() === "Expand").trigger("click");
+
+    expect(observationCard.text()).toContain("Vaisala HMP155 · Since 2020, ongoing · operational");
+    expect(observationCard.text()).toContain("No details yet");
+    expect(vueWarnings()).toEqual([]);
+  });
+
   it("opens a nested list item in the drill-in dialog", async () => {
     getStation.mockResolvedValue(allFields);
     mountForm({ stationId: 7 });

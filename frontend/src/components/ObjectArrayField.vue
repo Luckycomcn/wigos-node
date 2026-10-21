@@ -1,5 +1,5 @@
 <script>
-const INPUT_TYPES = ["text", "date", "datetime-local"];
+const INPUT_TYPES = ["text", "date", "datetime-local", "duration"];
 
 function emptyValueForField(field) {
   if (field.default !== undefined) return field.default;

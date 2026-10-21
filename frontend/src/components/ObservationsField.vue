@@ -56,14 +56,24 @@ function observationFields(codelists) {
       type: "array-object",
       fields: configurationFields,
       required: true,
-      summary: (c) =>
-        [c.instrument?.manufacturer, c.instrument?.model].filter(Boolean).join(" ") ||
-        describeInterval(c.time?.intervalStart, c.time?.intervalEnd),
+      summary: configurationSummary,
     },
   ];
 }
 
 const observationSummary = (o) => o.observedProperty?.title || o.observedProperty?.id;
+
+// e.g. "Vaisala HMP155 · Since 2020, ongoing · Operational". A configuration
+// with none of these (a stored one may hold only its id) says so, rather than
+// showing a blank card.
+const configurationSummary = (c) =>
+  [
+    [c.instrument?.manufacturer, c.instrument?.model].filter(Boolean).join(" "),
+    describeInterval(c.time?.intervalStart, c.time?.intervalEnd),
+    c.operatingStatus?.title || c.operatingStatus?.id,
+  ]
+    .filter(Boolean)
+    .join(" · ") || "No details yet";
 </script>
 
 <script setup>

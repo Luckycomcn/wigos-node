@@ -8,7 +8,7 @@ export const TIME_FIELDS = [
   { name: "date", label: "Date", type: "date" },
   { name: "timestamp", label: "Timestamp", type: "datetime-local" },
   { name: "interval", label: "Interval", type: "interval", start: "intervalStart", end: "intervalEnd" },
-  { name: "resolution", label: "Resolution", type: "text", placeholder: "ISO 8601 duration, e.g. P1D, PT1H" },
+  { name: "resolution", label: "Resolution", type: "duration" },
 ];
 
 // The station's own time has no resolution (wmo-im/wmdr2 PR #41 disallows it
