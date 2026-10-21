@@ -92,15 +92,17 @@ export function intervalError(start, end, options) {
 const isOpen = (bound) => bound.kind === "open" || bound.kind === "empty";
 
 // One line for a collapsed item, e.g. "Since January 2020, ongoing". Empty
-// when neither bound is set; invalid bounds are shown as typed.
+// when neither bound is set; invalid bounds are shown as typed. A year or month
+// end covers that whole period, so it reads "end of 2026", not "2026".
 export function describeInterval(start, end, options) {
   const from = readBound(start, options);
   const to = readBound(end, options);
   const label = (bound, value) => bound.label || (value ?? "").toString().trim();
+  const endLabel = ["year", "month"].includes(to.kind) ? `end of ${to.label}` : label(to, end);
   if (isOpen(from) && isOpen(to)) return "";
-  if (isOpen(from)) return `Until ${label(to, end)}`;
+  if (isOpen(from)) return `Until ${endLabel}`;
   if (isOpen(to)) return `Since ${label(from, start)}, ongoing`;
-  return `${label(from, start)} – ${label(to, end)}`;
+  return `${label(from, start)} – ${endLabel}`;
 }
 
 // The date picker's value as a day bound, and a day bound as the picker's value.

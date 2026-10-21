@@ -2,10 +2,10 @@
 import { computed, reactive } from "vue";
 import { OPEN, dayFromPicker, describeInterval, intervalError, pickerFromDay, readBound } from "../interval";
 
-// A From – To interval. Each bound is typed freely and read back underneath
-// ("January 2020"); a calendar picks a day; "Unknown" / "Ongoing" store an open
-// bound (".."). `daysOnly` restricts bounds to full dates, as affiliation and
-// territory dates require.
+// A From – To interval. Bounds are typed freely and the interval is read back
+// below ("Since January 2020, ongoing"); a calendar picks a day; "Unknown" /
+// "Ongoing" store an open bound (".."). `daysOnly` restricts bounds to full
+// dates, as affiliation and territory dates require.
 const props = defineProps({
   label: { type: String, required: true },
   daysOnly: Boolean,
@@ -25,10 +25,8 @@ const rangeError = computed(() => intervalError(start.value, end.value, options.
 const summary = computed(() => describeInterval(start.value, end.value, options.value));
 
 const isOpen = (bound) => bound.model.value === OPEN;
-const reading = (bound) => readBound(bound.model.value, options.value);
-const hintOf = (bound) => reading(bound).label || "";
 function errorsOf(bound) {
-  const read = reading(bound);
+  const read = readBound(bound.model.value, options.value);
   if (read.kind === "invalid") return [read.message];
   return bound.key === "end" && rangeError.value ? [rangeError.value] : [];
 }
@@ -53,8 +51,6 @@ function pick(bound, value) {
             :disabled="isOpen(bound)"
             :placeholder="isOpen(bound) ? '' : daysOnly ? 'YYYY-MM-DD' : 'e.g. 2020, 2020-01, 2020-01-31'"
             :persistent-placeholder="!isOpen(bound)"
-            :hint="hintOf(bound)"
-            persistent-hint
             :error-messages="errorsOf(bound)"
             @update:model-value="(value) => set(bound, value)"
           >

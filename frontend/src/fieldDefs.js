@@ -24,14 +24,14 @@ export const GEOMETRY_FIELDS = [
   { name: "height", label: "Height (m)", type: "text" },
 ];
 
-// Record-level links: rel and href are required.
+// Record-level links: rel and href are required. `length` (the target's size
+// in bytes) isn't offered on any link; a stored value is still written back.
 export const LINK_FIELDS = [
   { name: "href", label: "URL", type: "text", required: true, placeholder: "https://..." },
   { name: "rel", label: "Relation", type: "text", required: true, default: "about", placeholder: "e.g. about, alternate" },
   { name: "type", label: "Media type", type: "text", placeholder: "e.g. text/html" },
   { name: "hreflang", label: "Language", type: "text", placeholder: "e.g. en" },
   { name: "title", label: "Title", type: "text" },
-  { name: "length", label: "Length (bytes)", type: "text" },
 ];
 
 // Contact links (the OGC Records link shape): href and type are required,
@@ -40,7 +40,6 @@ const CONTACT_LINK_BASE_FIELDS = [
   { name: "type", label: "Media type", type: "text", placeholder: "e.g. text/html" },
   { name: "hreflang", label: "Language", type: "text", placeholder: "e.g. en" },
   { name: "title", label: "Title", type: "text" },
-  { name: "length", label: "Length (bytes)", type: "text" },
   { name: "profile", label: "Profiles", type: "array-string" },
   { name: "created", label: "Created", type: "datetime-local" },
   { name: "updated", label: "Updated", type: "datetime-local" },

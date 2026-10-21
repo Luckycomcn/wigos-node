@@ -53,8 +53,11 @@ describe("describeInterval", () => {
   it.each([
     ["2020-01", "..", "Since January 2020, ongoing"],
     ["2020-01", "", "Since January 2020, ongoing"],
-    ["..", "2015-03", "Until March 2015"],
-    ["2010", "2015-03", "2010 – March 2015"],
+    ["..", "2015-03", "Until end of March 2015"],
+    ["2010", "2015-03", "2010 – end of March 2015"],
+    ["2026-06", "2026", "June 2026 – end of 2026"],
+    ["2010", "2015-03-31", "2010 – 31 March 2015"],
+    ["2010", "2015-03-31T12:00:00Z", "2010 – 31 March 2015, 12:00:00 UTC"],
     ["..", "..", ""],
     ["", "", ""],
     ["someday", "..", "Since someday, ongoing"],

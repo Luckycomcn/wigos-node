@@ -91,7 +91,7 @@ describe("WmdrForm", () => {
     await flushPromises();
 
     await inputByLabel("From").setValue("2020-01");
-    expect(wrapper.text()).toContain("January 2020");
+    expect(wrapper.text()).toContain("Since January 2020, ongoing");
     expect(preview().time.interval).toEqual(["2020-01", ".."]);
 
     await inputByLabel("To").setValue("2019");
