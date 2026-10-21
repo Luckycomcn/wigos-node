@@ -100,9 +100,10 @@ CSRF_TRUSTED_ORIGINS = os.environ.get(
     "CSRF_TRUSTED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
 ).split(",")
 
-# WIS2 Notification Messages (api/wnm.py): the public origin the record links
-# point at.
-WNM_BASE_URL = os.environ.get("WNM_BASE_URL", "http://localhost:8000")
+# WIS2 Notification Messages (api/wnm.py): this node's WIS2 centre id, and the
+# public web storage the announced record files are served from.
+WNM_CENTRE_ID = os.environ.get("WNM_CENTRE_ID", "io-wis2dev-test-wigosnode")
+WNM_STORAGE_URL = os.environ.get("WNM_STORAGE_URL", "https://wigosnode.test.wis2dev.io/webstorage")
 
 REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
