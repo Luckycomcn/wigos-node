@@ -1,5 +1,6 @@
 import csv
 import logging
+from pathlib import Path
 
 from django.db import migrations
 
@@ -8,7 +9,10 @@ logger = logging.getLogger(__name__)
 wmo_members = []
 
 # Read ISO3166.csv and populate wmo_members
-with open('/app/api/codelists/ISO3166.csv', 'r') as f:
+# 路径基于本文件定位，而不是容器内的 /app —— 否则在宿主机/CI 里跑迁移会直接
+# FileNotFoundError，`makemigrations --check` 和 `manage.py test` 都过不去。
+_ISO3166 = Path(__file__).resolve().parent.parent / 'codelists' / 'ISO3166.csv'
+with open(_ISO3166, 'r') as f:
     reader = csv.DictReader(f)
     for i, row in enumerate(reader):
         # Assuming 'name' column for country name, adjust as needed
