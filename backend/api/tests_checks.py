@@ -84,3 +84,25 @@ class ValidateViewTests(SimpleTestCase):
         self.assertTrue(response.data["ets_requested"])
         # 本机没有 pywmdr，所以 available 是 False——这正是要固化的行为
         self.assertFalse(response.data["ets_available"])
+
+    def test_schema_layer_is_part_of_the_self_check(self):
+        """F-9 要求结构 + 业务 + 词表三层；只跑后两层等于没做自检。"""
+        broken = copy.deepcopy(self.good)
+        del broken["properties"]["title"]  # properties.title 是必填
+        result = response = self.post({"record": broken})
+        self.assertEqual(response.status_code, 200)
+        entry = result.data["results"][0]
+        self.assertFalse(entry["ok"])
+        self.assertFalse(entry["schema"]["ok"])
+        self.assertIn("title", entry["schema"]["errors"][0])
+        self.assertIn("schema", [e["code"] for e in entry["errors"]])
+
+    def test_good_record_passes_schema_layer(self):
+        entry = self.post({"record": self.good}).data["results"][0]
+        self.assertTrue(entry["schema"]["ok"])
+        self.assertEqual(entry["schema"]["errors"], [])
+
+    def test_non_dict_record_fails_schema_not_crash(self):
+        entry = check_one(["not", "a", "record"])
+        self.assertFalse(entry["ok"])
+        self.assertIn("JSON object", entry["schema"]["errors"][0])

@@ -25,20 +25,40 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from . import ets, rules
+from . import ets, rules, stations
 
 logger = logging.getLogger(__name__)
 
 
 def check_one(record, run_ets=False):
-    """对单条记录跑 业务规则 + 受控词表（+ 可选 ETS）。"""
+    """对单条记录跑 结构 + 业务规则 + 受控词表（+ 可选 ETS）。
+
+    三层是 F-9 要求的完整口径，缺任何一层都会让"本地合格、目录不合格"重新出现：
+    schema 过不了的记录谈不上业务正确，业务不对的记录由 rules 层揪出来，
+    词表不在表里的记录目录侧会直接判不合规。
+    """
     outcome = rules.check_record(record)
+
+    # 结构层：JSON Schema / WMDR2 bundled。record 不是 dict 时直接算结构不合格。
+    schema_errors = stations.validate(record, strict=False) if isinstance(record, dict) else [
+        "The record must be a JSON object."
+    ]
+
     result = {
         "id": record.get("id") if isinstance(record, dict) else None,
         "ok": outcome["ok"],
         "errors": outcome["errors"],
         "warnings": outcome["warnings"],
+        "schema": {"ok": not schema_errors, "errors": schema_errors},
     }
+    if schema_errors:
+        result["ok"] = False
+        result["errors"] = result["errors"] + [{
+            "code": "schema",
+            "rule": "WMDR2 JSON schema",
+            "severity": "error",
+            "messages": schema_errors[:20],
+        }]
     if run_ets:
         report = ets.run_ets(record)
         result["ets"] = report
