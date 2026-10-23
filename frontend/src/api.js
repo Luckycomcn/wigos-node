@@ -223,3 +223,102 @@ export async function createStationsBatch(records, { dryRun = false } = {}) {
     body: JSON.stringify({ dry_run: dryRun, records }),
   })), "Failed to create records in batch");
 }
+
+// --------------------------------------------------------------------------- //
+// F-16 export / F-15 ingest / F-21 WMDR1 import / F-13 providers
+// --------------------------------------------------------------------------- //
+function filenameFrom(response, fallback) {
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const match = disposition.match(/filename="?([^";]+)"?/);
+  return match ? match[1] : fallback;
+}
+
+function triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+// Bulk export in csv / json / xml; `stationIds` empty means every visible record.
+export async function exportStations(format, { stationIds = [], includeArchived = false } = {}) {
+  const params = new URLSearchParams({ format });
+  stationIds.forEach((id) => params.append("station_id", id));
+  if (includeArchived) params.set("include_archived", "1");
+  const res = handle401(await fetch(`${API_URL}/api/export/?${params}`, { credentials: "include" }));
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || `Export failed: ${res.status}`);
+  }
+  const blob = await res.blob();
+  triggerDownload(blob, filenameFrom(res, `wigos-wmdr2.${format}`));
+  return { size: blob.size, filename: filenameFrom(res, `wigos-wmdr2.${format}`) };
+}
+
+export async function exportStation(stationId, format) {
+  const res = handle401(await fetch(`${API_URL}/api/wmdrv2/${stationId}/export?format=${format}`, {
+    credentials: "include",
+  }));
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || `Export failed: ${res.status}`);
+  }
+  const blob = await res.blob();
+  const filename = filenameFrom(res, `wmdr2-${stationId}.${format}`);
+  triggerDownload(blob, filename);
+  return { size: blob.size, filename };
+}
+
+// Upload a CSV / JSON / XML payload (FormData with `file`) or inline text.
+export async function importRecords({ file = null, format = null, data = null, dryRun = false } = {}) {
+  let body;
+  const headers = { ...csrfHeader() };
+  if (file) {
+    body = new FormData();
+    body.append("file", file);
+    if (format) body.append("format", format);
+    if (dryRun) body.append("dry_run", "true");
+    delete headers["Content-Type"];
+  } else {
+    body = JSON.stringify({ format, data, dry_run: dryRun });
+    headers["Content-Type"] = "application/json";
+  }
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/import/`, {
+    method: "POST", credentials: "include", headers, body,
+  })), "Import failed");
+}
+
+export async function importWmdr1(records, { dryRun = false } = {}) {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/import/wmdr1/`, {
+    method: "POST", credentials: "include", headers: jsonHeaders(),
+    body: JSON.stringify({ records, dry_run: dryRun }),
+  })), "WMDR1 import failed");
+}
+
+export async function listProviders(stationId) {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/wmdrv2/${stationId}/providers/`, {
+    credentials: "include",
+  })), "Failed to load providers");
+}
+
+export async function addProvider(stationId, { organization, role = "dataProvider", contact = {} }) {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/wmdrv2/${stationId}/providers/`, {
+    method: "POST", credentials: "include", headers: jsonHeaders(),
+    body: JSON.stringify({ organization, role, contact }),
+  })), "Failed to add provider");
+}
+
+export async function removeProvider(providerId) {
+  const res = handle401(await fetch(`${API_URL}/api/providers/${providerId}/`, {
+    method: "DELETE", credentials: "include", headers: { ...csrfHeader() },
+  }));
+  if (!res.ok && res.status !== 204) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || `Failed to remove provider: ${res.status}`);
+  }
+  return true;
+}

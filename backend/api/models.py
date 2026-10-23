@@ -219,6 +219,34 @@ class StationGrade(models.Model):
         return f"{self.code}: {self.label}"
 
 
+class RecordProvider(models.Model):
+    """F-13: several organisations may provide one record.
+
+    WMDR2 has no slot for a provider chain (its ``properties.contacts`` is a
+    contact list, not an attribution), so the node keeps the attribution here
+    and exposes it at ``/api/wmdrv2/<id>/providers/``. The record's owner is
+    always reported as an implicit ``owner`` provider, so a record can never
+    look unowned.
+    """
+
+    station = models.ForeignKey(Station, on_delete=models.CASCADE, related_name="providers")
+    organization = models.CharField(max_length=255)
+    role = models.CharField(max_length=32, default="dataProvider")
+    contact = models.JSONField(default=dict, blank=True)
+    created = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        "WIGOSNodeUser", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="record_providers",
+    )
+
+    class Meta:
+        ordering = ["role", "organization"]
+        unique_together = ("station", "organization", "role")
+
+    def __str__(self):
+        return f"{self.organization} ({self.role}) @ {self.station_id}"
+
+
 class PublishedRecord(models.Model):
     """F-14/F-15 publishing: each publish emits a WIS2 Notification Message
     (api/wnm.py) for a record version and records where the file landed."""

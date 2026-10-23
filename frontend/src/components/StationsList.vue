@@ -3,6 +3,8 @@ import { computed, ref } from "vue";
 import {
   archiveStation,
   deleteStation,
+  exportStation,
+  exportStations,
   listMyStations,
   publishStation,
   restoreStation,
@@ -10,6 +12,7 @@ import {
 import StationsMap from "./StationsMap.vue";
 import SelectionBar from "./SelectionBar.vue";
 import HistoryDialog from "./HistoryDialog.vue";
+import ToolsPanel from "./ToolsPanel.vue";
 
 // `selected` (a Set of station IDs) is kept by the parent so it survives a
 // trip to the batch wizard and back.
@@ -30,6 +33,8 @@ const message = ref(null);
 const showArchived = ref(false);
 const historyOpen = ref(false);
 const historyStationId = ref(null);
+const toolsOpen = ref(false);
+const toolsTab = ref("import");
 
 async function load() {
   loadState.value = { status: "loading" };
@@ -72,6 +77,23 @@ function onHistory(station) {
   historyOpen.value = true;
 }
 
+// F-16: export the ticked records, or everything currently listed.
+function onExport(format) {
+  const ids = selectedIds.value.length ? selectedIds.value : [];
+  return run(
+    () => exportStations(format, { stationIds: ids, includeArchived: showArchived.value }),
+    (result) => `Exported ${ids.length || stations.value.length} record(s) → ${result.filename}`,
+  );
+}
+
+const onExportOne = (station, format) =>
+  run(() => exportStation(station.station_id, format), (r) => `Exported ${station.wsi} → ${r.filename}`);
+
+function openTools(tabName) {
+  toolsTab.value = tabName;
+  toolsOpen.value = true;
+}
+
 load();
 
 const editableIds = computed(() => stations.value.filter((s) => s.can_edit && !s.archived).map((s) => s.station_id));
@@ -89,6 +111,20 @@ const rowProps = ({ item }) => ({ class: selectedIds.value.includes(item.station
       <h3>My stations</h3>
       <div class="d-flex align-center ga-3">
         <v-switch v-model="showArchived" label="Show archived" density="compact" hide-details @update:model-value="load" />
+        <v-menu>
+          <template #activator="{ props: menuProps }">
+            <v-btn v-bind="menuProps" variant="tonal" prepend-icon="mdi-download" :disabled="busy || stations.length === 0">
+              Export{{ selectedIds.length ? ` (${selectedIds.length})` : "" }}
+            </v-btn>
+          </template>
+          <v-list density="compact">
+            <v-list-item title="CSV" @click="onExport('csv')" />
+            <v-list-item title="JSON" @click="onExport('json')" />
+            <v-list-item title="XML" @click="onExport('xml')" />
+          </v-list>
+        </v-menu>
+        <v-btn variant="tonal" prepend-icon="mdi-upload" @click="openTools('import')">Import</v-btn>
+        <v-btn variant="tonal" prepend-icon="mdi-tools" @click="openTools('templates')">Tools</v-btn>
         <v-btn color="primary" prepend-icon="mdi-plus" @click="emit('new')">New station</v-btn>
       </div>
     </div>
@@ -141,6 +177,16 @@ const rowProps = ({ item }) => ({ class: selectedIds.value.includes(item.station
           <div class="d-flex ga-1 justify-end flex-wrap">
             <v-btn v-if="!item.archived" variant="tonal" color="secondary" size="small" @click="emit('edit', item.station_id)">Edit</v-btn>
             <v-btn variant="text" size="small" @click="onHistory(item)">History</v-btn>
+            <v-menu>
+              <template #activator="{ props: menuProps }">
+                <v-btn v-bind="menuProps" variant="text" size="small">Export</v-btn>
+              </template>
+              <v-list density="compact">
+                <v-list-item title="CSV" @click="onExportOne(item, 'csv')" />
+                <v-list-item title="JSON" @click="onExportOne(item, 'json')" />
+                <v-list-item title="XML" @click="onExportOne(item, 'xml')" />
+              </v-list>
+            </v-menu>
             <v-btn v-if="!item.archived && item.can_edit" variant="tonal" color="primary" size="small" :disabled="busy" @click="onPublish(item)">Publish</v-btn>
             <v-btn v-if="!item.archived && item.can_edit" variant="tonal" size="small" :disabled="busy" @click="onArchive(item)">Archive</v-btn>
             <v-btn v-if="item.archived && item.can_edit" variant="tonal" size="small" :disabled="busy" @click="onRestore(item)">Restore</v-btn>
@@ -151,6 +197,7 @@ const rowProps = ({ item }) => ({ class: selectedIds.value.includes(item.station
     </template>
 
     <HistoryDialog v-model="historyOpen" :station-id="historyStationId" />
+    <ToolsPanel v-model="toolsOpen" :station-ids="selectedIds" :initial-tab="toolsTab" @imported="load" />
   </v-card>
 </template>
 

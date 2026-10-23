@@ -7,7 +7,9 @@ import logging
 from pathlib import Path
 
 from django.conf import settings
+from django.contrib.gis.geos import Polygon
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -503,20 +505,106 @@ class BatchCreateView(APIView):
 # --------------------------------------------------------------------------- #
 COLLECTION_ID = "wigos-observing-facility-metadata"
 
+# F-14: what this node actually implements, declared instead of implied.
+OGC_CONFORMANCE = [
+    "http://www.opengis.net/spec/ogcapi-common-1/1.0/conf/core",
+    "http://www.opengis.net/spec/ogcapi-common-2/1.0/conf/collections",
+    "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/core",
+    "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/oas30",
+    "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/geojson",
+    "http://www.opengis.net/spec/ogcapi-records-1/1.0/conf/core",
+    "http://www.opengis.net/spec/ogcapi-records-1/1.0/conf/sorting",
+]
+
+MAX_LIMIT = 1000
+CRS84 = "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
+
+
+def _int_param(request, name, default):
+    """Query params must not turn into 500s (F-14 conformance: 400 on bad input)."""
+    raw = request.query_params.get(name)
+    if raw in (None, ""):
+        return default, None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None, Response({"detail": f"{name} must be an integer, got '{raw}'"}, status=400)
+    if value < 0:
+        return None, Response({"detail": f"{name} must be >= 0"}, status=400)
+    return value, None
+
+
+def _bbox_param(request):
+    """bbox=minLon,minLat[,minZ],maxLon,maxLat[,maxZ] -> (geometry, error)."""
+    raw = request.query_params.get("bbox")
+    if not raw:
+        return None, None
+    try:
+        values = [float(part) for part in raw.split(",")]
+    except ValueError:
+        return None, Response({"detail": f"bbox 必须是数字，收到 '{raw}'"}, status=400)
+    if len(values) == 4:
+        min_lon, min_lat, max_lon, max_lat = values
+    elif len(values) == 6:
+        min_lon, min_lat, _, max_lon, max_lat, _ = values
+    else:
+        return None, Response(
+            {"detail": "bbox 必须是 4 或 6 个数字（minLon,minLat[,minZ],maxLon,maxLat[,maxZ]）"},
+            status=400,
+        )
+    if not (-180 <= min_lon <= 180 and -180 <= max_lon <= 180
+            and -90 <= min_lat <= 90 and -90 <= max_lat <= 90):
+        return None, Response({"detail": "bbox 超出经纬度范围（CRS84）"}, status=400)
+    if min_lon > max_lon or min_lat > max_lat:
+        return None, Response({"detail": "bbox 的最小值必须小于等于最大值"}, status=400)
+    return Polygon.from_bbox((min_lon, min_lat, max_lon, max_lat)), None
+
+
+def _datetime_filter(value):
+    """datetime=RFC3339 | start/.. | ../end | start/end -> Q object."""
+    if not value:
+        return None
+    parts = value.split("/")
+    if len(parts) > 2:
+        raise ValueError("datetime 只支持 'instant'、'start/..'、'../end' 或 'start/end'")
+    start = parts[0] if parts and parts[0] not in ("", "..") else None
+    end = parts[1] if len(parts) == 2 and parts[1] not in ("", "..") else None
+    if start is None and end is None:
+        return None
+    filters = Q()
+    for field in ("updated", "created"):
+        key = f"wmdrv2__properties__{field}"
+        if start:
+            filters |= Q(**{f"{key}__gte": start})
+        if end:
+            filters |= Q(**{f"{key}__lte": end})
+    return filters
+
+
+class OgcConformanceView(APIView):
+    """GET /records/conformance — declared conformance classes (F-14)."""
+
+    permission_classes = []
+
+    def get(self, request):
+        return Response({"conformsTo": OGC_CONFORMANCE})
+
 
 class OgcCollectionsView(APIView):
     permission_classes = []
 
     def get(self, request):
+        base = request.build_absolute_uri().rstrip("/").rsplit("/", 1)[0]
         return Response({
             "collections": [{
                 "id": COLLECTION_ID,
                 "title": "WIGOS Observing Facility Metadata",
                 "description": "WMDR2 records held by this WIGOS node",
                 "itemType": "feature",
-                "crs": ["http://www.opengis.net/def/crs/OGC/1.3/CRS84"],
+                "crs": [CRS84],
+                "bbox": None,
                 "links": [
-                    {"href": f"{request.build_absolute_uri().rstrip('/')}/{COLLECTION_ID}/items",
+                    {"href": f"{base}/{COLLECTION_ID}/items",
                      "rel": "items", "type": "application/geo+json"},
                 ],
             }],
@@ -524,32 +612,87 @@ class OgcCollectionsView(APIView):
         })
 
 
+class OgcCollectionView(APIView):
+    """GET /records/collections/<id> — one collection's metadata."""
+
+    permission_classes = []
+
+    def get(self, request, collection_id):
+        if collection_id != COLLECTION_ID:
+            return Response({"detail": f"Unknown collection '{collection_id}'"}, status=404)
+        base = request.build_absolute_uri().rstrip("/")
+        return Response({
+            "id": COLLECTION_ID,
+            "title": "WIGOS Observing Facility Metadata",
+            "description": "WMDR2 records held by this WIGOS node",
+            "itemType": "feature",
+            "crs": [CRS84],
+            "links": [
+                {"href": f"{base}/items", "rel": "items", "type": "application/geo+json"},
+                {"href": request.build_absolute_uri(), "rel": "self",
+                 "type": "application/json"},
+            ],
+        })
+
+
 class OgcItemsView(APIView):
     permission_classes = []
 
-    def get(self, request):
+    def get(self, request, collection_id):
+        if collection_id != COLLECTION_ID:
+            return Response({"detail": f"Unknown collection '{collection_id}'"}, status=404)
+
+        limit, error = _int_param(request, "limit", 100)
+        if error:
+            return error
+        offset, error = _int_param(request, "offset", 0)
+        if error:
+            return error
+        limit = max(1, min(limit or 100, MAX_LIMIT))
+
+        geometry, error = _bbox_param(request)
+        if error:
+            return error
+
         qs = Station.objects.filter(archived=False)
-        limit = min(int(request.query_params.get("limit", 100) or 100), 1000)
-        offset = int(request.query_params.get("offset", 0) or 0)
+        if geometry is not None:
+            qs = qs.filter(location__within=geometry)
+        try:
+            filters = _datetime_filter(request.query_params.get("datetime"))
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
+        if filters is not None:
+            qs = qs.filter(filters)
+
         total = qs.count()
         features = [s.wmdrv2 for s in qs.order_by("id")[offset:offset + limit]]
         base = request.build_absolute_uri().split("?")[0]
+        links = [
+            {"href": request.build_absolute_uri(), "rel": "self", "type": "application/geo+json"},
+            {"href": base.rsplit("/items", 1)[0], "rel": "collection", "type": "application/json"},
+        ]
+        if offset + len(features) < total:
+            links.append({"href": f"{base}?limit={limit}&offset={offset + limit}",
+                          "rel": "next", "type": "application/geo+json"})
+        if offset > 0:
+            links.append({"href": f"{base}?limit={limit}&offset={max(0, offset - limit)}",
+                          "rel": "prev", "type": "application/geo+json"})
         return Response({
             "type": "FeatureCollection",
             "features": features,
             "numberMatched": total,
             "numberReturned": len(features),
-            "links": [
-                {"href": base, "rel": "self", "type": "application/geo+json"},
-                {"href": f"{base.rsplit('/items', 1)[0]}", "rel": "collection", "type": "application/json"},
-            ],
+            "timeStamp": timezone.now().isoformat(),
+            "links": links,
         })
 
 
 class OgcItemView(APIView):
     permission_classes = []
 
-    def get(self, request, wsi):
+    def get(self, request, collection_id, wsi):
+        if collection_id != COLLECTION_ID:
+            return Response({"detail": f"Unknown collection '{collection_id}'"}, status=404)
         station = (
             Station.objects.filter(wigos_identifier=wsi, archived=False).first()
             or Station.objects.filter(archived=False).with_additional_wigos_identifier(wsi).first()

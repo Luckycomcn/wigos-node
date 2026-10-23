@@ -1,6 +1,6 @@
 from django.urls import include, path
 
-from . import auth, mvp, views
+from . import auth, interop, mvp, views
 from .views import Wmdrv2BatchView, Wmdrv2ByWsiView, Wmdrv2View
 
 urlpatterns = [
@@ -31,9 +31,21 @@ urlpatterns = [
     path("grades/", mvp.GradeListCreateView.as_view(), name="grades"),
     path("stations/<int:station_id>/grades/", mvp.GradeEvaluateView.as_view(), name="station-grades"),
     path("wsi/next/", mvp.WsiNextView.as_view(), name="wsi-next"),
+    # F-14: conformance, one collection, items (literal path before the <str> one)
+    path("records/conformance", mvp.OgcConformanceView.as_view(), name="ogc-conformance"),
     path("records/collections/", mvp.OgcCollectionsView.as_view(), name="ogc-collections"),
     path("records/collections/<str:collection_id>/items", mvp.OgcItemsView.as_view(), name="ogc-items"),
     path("records/collections/<str:collection_id>/items/<str:wsi>", mvp.OgcItemView.as_view(), name="ogc-item"),
+    path("records/collections/<str:collection_id>", mvp.OgcCollectionView.as_view(), name="ogc-collection"),
+    # F-16 export: bulk and single record
+    path("export/", interop.ExportView.as_view(), name="export"),
+    path("wmdrv2/<int:station_id>/export", interop.StationExportView.as_view(), name="wmdrv2-export"),
+    # F-15 ingest / F-21 WMDR1 import
+    path("import/", interop.ImportView.as_view(), name="import"),
+    path("import/wmdr1/", interop.Wmdr1ImportView.as_view(), name="import-wmdr1"),
+    # F-13 providers: several organisations per record
+    path("wmdrv2/<int:station_id>/providers/", interop.StationProviderView.as_view(), name="wmdrv2-providers"),
+    path("providers/<int:provider_id>/", interop.ProviderDetailView.as_view(), name="provider-detail"),
     # JSON auth endpoints for the SPA (the DRF HTML login stays at auth/ below)
     path("csrf/", auth.csrf, name="auth-csrf"),
     path("login/", auth.login, name="auth-login"),
