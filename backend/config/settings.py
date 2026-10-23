@@ -104,6 +104,10 @@ CSRF_TRUSTED_ORIGINS = os.environ.get(
 # public web storage the announced record files are served from.
 WNM_CENTRE_ID = os.environ.get("WNM_CENTRE_ID", "io-wis2dev-test-wigosnode")
 WNM_STORAGE_URL = os.environ.get("WNM_STORAGE_URL", "https://wigosnode.test.wis2dev.io/webstorage")
+# Where published record files are written, and an optional catalogue/broker
+# endpoint the WNM is POSTed to (empty = local-only, offline safe).
+WNM_STORAGE_DIR = os.environ.get("WNM_STORAGE_DIR", str(BASE_DIR / "webstorage"))
+WNM_PUBLISH_URL = os.environ.get("WNM_PUBLISH_URL", "")
 
 REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [

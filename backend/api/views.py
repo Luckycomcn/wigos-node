@@ -56,7 +56,11 @@ def geojson(request):
 
 @api_view(["GET"])
 def my_stations(request):
-    my_stations = Station.objects.filter(wmdrv2__isnull=False) # return all stations in the meantime
+    # F-19: archived records are hidden unless explicitly requested.
+    include_archived = request.query_params.get("include_archived") in ("1", "true", "yes")
+    my_stations = Station.objects.filter(wmdrv2__isnull=False)
+    if not include_archived:
+        my_stations = my_stations.filter(archived=False)
     editable = stations.editable_station_ids(request.user)
     return Response([
         {
@@ -66,6 +70,7 @@ def my_stations(request):
             "latitude": station.location.y,
             "longitude": station.location.x,
             "can_edit": station.id in editable,
+            "archived": station.archived,
         }
         for station in my_stations
     ])
@@ -146,6 +151,20 @@ class Wmdrv2View(APIView):
             return _error_response(e)
 
         return Response({"message": f"Station {station.id} created successfully.", "station_id": station.id}, status=201)
+
+    def delete(self, request, station_id=None):
+        """F-19: hard delete. Archive (/archive) is the reversible option; only
+        the record owner or a superuser may destroy a record."""
+        if station_id is None:
+            return Response({"error": "Station ID is required for deletion."}, status=400)
+        try:
+            station = Station.objects.get(id=station_id)
+        except Station.DoesNotExist:
+            return Response({"detail": f"Station {station_id} not found"}, status=404)
+        if not (request.user.is_superuser or station.owner_id == request.user.id):
+            return Response({"detail": "Only the record owner or a superuser may delete a station."}, status=403)
+        station.delete()
+        return Response(status=204)
 
 
 class Wmdrv2ByWsiView(APIView):

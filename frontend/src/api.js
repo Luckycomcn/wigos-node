@@ -72,8 +72,9 @@ export async function saveStationsBatch(updates, { dryRun = false } = {}) {
   return data;
 }
 
-export async function listMyStations() {
-  const res = handle401(await fetch(`${API_URL}/api/my_stations/`, { credentials: "include" }));
+export async function listMyStations(includeArchived = false) {
+  const suffix = includeArchived ? "?include_archived=1" : "";
+  const res = handle401(await fetch(`${API_URL}/api/my_stations/${suffix}`, { credentials: "include" }));
   if (!res.ok) {
     throw new Error(`API request failed: ${res.status}`);
   }
@@ -118,4 +119,107 @@ export async function getCodelist(scheme) {
       description: (row["dct:description"] || "").replace(/@[A-Za-z-]+$/, "").replace(/^'([\s\S]*)'$/, "$1").trim(),
     }))
     .filter((entry) => entry.code);
+}
+
+// --------------------------------------------------------------------------
+// MVP completion: archive / history / publish / groups / templates / grades
+// --------------------------------------------------------------------------
+async function jsonOrThrow(res, fallback) {
+  const data = res.status === 204 ? {} : await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.detail || data.error || fallback || `API request failed: ${res.status}`);
+  }
+  return data;
+}
+
+const jsonHeaders = () => ({ "Content-Type": "application/json", ...csrfHeader() });
+
+export async function archiveStation(stationId) {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/wmdrv2/${stationId}/archive`, {
+    method: "POST", credentials: "include", headers: jsonHeaders(),
+  })), "Failed to archive station");
+}
+
+export async function restoreStation(stationId) {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/wmdrv2/${stationId}/restore`, {
+    method: "POST", credentials: "include", headers: jsonHeaders(),
+  })), "Failed to restore station");
+}
+
+export async function deleteStation(stationId) {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/wmdrv2/${stationId}`, {
+    method: "DELETE", credentials: "include", headers: jsonHeaders(),
+  })), "Failed to delete station");
+}
+
+export async function getStationHistory(stationId) {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/wmdrv2/${stationId}/history/`, {
+    credentials: "include",
+  })), "Failed to load history");
+}
+
+export async function getStationVersion(stationId, version) {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/wmdrv2/${stationId}/history/${version}`, {
+    credentials: "include",
+  })), "Failed to load version");
+}
+
+export async function publishStation(stationId, operation = "canonical") {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/wmdrv2/${stationId}/publish`, {
+    method: "POST", credentials: "include", headers: jsonHeaders(),
+    body: JSON.stringify({ operation }),
+  })), "Failed to publish station");
+}
+
+export async function listGroups() {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/groups/`, { credentials: "include" })), "Failed to load groups");
+}
+
+export async function createGroup(name, description = "") {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/groups/`, {
+    method: "POST", credentials: "include", headers: jsonHeaders(),
+    body: JSON.stringify({ name, description }),
+  })), "Failed to create group");
+}
+
+export async function updateGroupMembers(groupId, add = [], remove = []) {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/groups/${groupId}/`, {
+    method: "POST", credentials: "include", headers: jsonHeaders(),
+    body: JSON.stringify({ add, remove }),
+  })), "Failed to update group members");
+}
+
+export async function listTemplates() {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/templates/`, { credentials: "include" })), "Failed to load templates");
+}
+
+export async function createTemplate(name, payload, { description = "", shared = false } = {}) {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/templates/`, {
+    method: "POST", credentials: "include", headers: jsonHeaders(),
+    body: JSON.stringify({ name, description, shared, payload }),
+  })), "Failed to create template");
+}
+
+export async function listGrades() {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/grades/`, { credentials: "include" })), "Failed to load grades");
+}
+
+export async function getStationGrades(stationId) {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/stations/${stationId}/grades/`, {
+    credentials: "include",
+  })), "Failed to evaluate grades");
+}
+
+export async function getNextWsi({ issuer, station = "0", series = "0" }) {
+  const params = new URLSearchParams({ issuer, station, series });
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/wsi/next/?${params}`, {
+    credentials: "include",
+  })), "Failed to allocate a WIGOS identifier");
+}
+
+export async function createStationsBatch(records, { dryRun = false } = {}) {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/wmdrv2/batch-create/`, {
+    method: "POST", credentials: "include", headers: jsonHeaders(),
+    body: JSON.stringify({ dry_run: dryRun, records }),
+  })), "Failed to create records in batch");
 }

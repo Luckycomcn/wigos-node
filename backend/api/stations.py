@@ -12,7 +12,7 @@ from django.db import IntegrityError
 from guardian.shortcuts import assign_perm, get_objects_for_user
 from jsonschema import Draft202012Validator
 
-from .models import Station, WIGOSNodeGroup
+from .models import Station, StationVersion, WIGOSNodeGroup
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +129,18 @@ def _save(station):
         raise StationError(f"The station could not be saved: {e}") from e
 
 
+def _snapshot(station, operation, user):
+    """F-8: keep an immutable copy of the record after every save."""
+    last = station.versions.order_by("-version").values_list("version", flat=True).first() or 0
+    StationVersion.objects.create(
+        station=station,
+        version=last + 1,
+        wmdrv2=station.wmdrv2,
+        operation=operation,
+        created_by=user if getattr(user, "is_authenticated", False) else None,
+    )
+
+
 def create_station(user, wmdrv2):
     validate(wmdrv2)
     wsis = wsis_of(wmdrv2)
@@ -138,6 +150,7 @@ def create_station(user, wmdrv2):
     # after save so the station has a pk to attach object permissions to
     assign_perm("change_station", user, station)
     assign_issuer_groups(station, wsis)
+    _snapshot(station, "create", user)
     return station
 
 
@@ -153,4 +166,5 @@ def update_station(user, station, wmdrv2):
     _save(station)  # owner is unchanged on update
     added = [wsi for wsi in new_wsis if issuer_of(wsi) not in {issuer_of(old) for old in old_wsis}]
     assign_issuer_groups(station, added)
+    _snapshot(station, "update", user)
     return station

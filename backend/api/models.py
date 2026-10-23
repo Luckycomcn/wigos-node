@@ -88,6 +88,11 @@ class Station(models.Model):
     
     owner = models.ForeignKey("WIGOSNodeUser", on_delete=models.CASCADE, related_name='stations')
 
+    # F-19: records are archived (soft delete) rather than destroyed; archived
+    # rows keep their identifiers reserved but drop out of the default listing.
+    archived = models.BooleanField(default=False, db_index=True)
+    archived_at = models.DateTimeField(null=True, blank=True)
+
     def get_wigos_identifiers(self):
         wsis = []
         if self.wmdrv2:
@@ -132,3 +137,104 @@ class Station(models.Model):
             # unsaved instance: generated fields / location not available yet
             wsis = self.get_wigos_identifiers()
             return f"Station({wsis[0] if wsis else 'unsaved'})"
+
+
+class StationVersion(models.Model):
+    """F-8: immutable snapshot of a station record at each save.
+
+    UI/spec items that reference the lifecycle (create → update → archive)
+    read from here. `version` is 1-based and increases per station."""
+
+    station = models.ForeignKey(Station, on_delete=models.CASCADE, related_name="versions")
+    version = models.PositiveIntegerField()
+    wmdrv2 = models.JSONField()
+    operation = models.CharField(max_length=16, default="create")  # create | update
+    created = models.DateTimeField(auto_now_add=True)
+    created_by = models.ForeignKey(
+        "WIGOSNodeUser", on_delete=models.SET_NULL, null=True, blank=True, related_name="station_versions"
+    )
+
+    class Meta:
+        ordering = ["-version"]
+        unique_together = ("station", "version")
+
+    def __str__(self):
+        return f"{self.station_id} v{self.version} ({self.operation})"
+
+
+class StationGroup(models.Model):
+    """F-6: records grouped into related collections, incl. cross-border clusters."""
+
+    name = models.CharField(max_length=255, unique=True)
+    description = models.TextField(blank=True, default="")
+    stations = models.ManyToManyField(Station, related_name="groups", blank=True)
+    owner = models.ForeignKey(
+        "WIGOSNodeUser", on_delete=models.CASCADE, related_name="station_groups"
+    )
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class StationTemplate(models.Model):
+    """F-22: fill-in template for common station types (field pre-fill + concatenation)."""
+
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    payload = models.JSONField()  # partial WMDR2 record used as prefill
+    owner = models.ForeignKey(
+        "WIGOSNodeUser", on_delete=models.CASCADE, related_name="station_templates"
+    )
+    shared = models.BooleanField(default=False)
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+        unique_together = ("owner", "name")
+
+    def __str__(self):
+        return self.name
+
+
+class StationGrade(models.Model):
+    """F-24: configurable grades derived from record metadata.
+
+    `criteria` is a list of {"path": "...", "op": "eq|ne|exists|contains|gt|lt",
+    "value": ...}. A grade matches when every criterion matches."""
+
+    code = models.SlugField(max_length=64, unique=True)
+    label = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    criteria = models.JSONField(default=list)
+    order = models.IntegerField(default=100)
+
+    class Meta:
+        ordering = ["order", "code"]
+
+    def __str__(self):
+        return f"{self.code}: {self.label}"
+
+
+class PublishedRecord(models.Model):
+    """F-14/F-15 publishing: each publish emits a WIS2 Notification Message
+    (api/wnm.py) for a record version and records where the file landed."""
+
+    station = models.ForeignKey(Station, on_delete=models.CASCADE, related_name="publications")
+    version = models.CharField(max_length=128)  # record properties.updated/created
+    wnm = models.JSONField()
+    url = models.URLField(max_length=1024)
+    operation = models.CharField(max_length=16, default="canonical")  # canonical|update|deletion
+    published = models.DateTimeField(auto_now_add=True)
+    published_by = models.ForeignKey(
+        "WIGOSNodeUser", on_delete=models.SET_NULL, null=True, blank=True, related_name="publications"
+    )
+
+    class Meta:
+        ordering = ["-published"]
+
+    def __str__(self):
+        return f"{self.station_id} @ {self.version}"
