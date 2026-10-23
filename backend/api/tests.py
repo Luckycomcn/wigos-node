@@ -63,8 +63,10 @@ class StationCreationTestCase(TestCase):
 class WnmCreationTestCase(SimpleTestCase):
 
     def setUp(self):
-        wmdrv2_data = load_test_json('test_wmdrv2.json')
-        self.wmdrv2_data = json.load(f)
+        # 上游把 with-open/json.load 改成 load_test_json 时留了半截：多了一行
+        # 未使用的 wmdrv2_data，真正用的 json.load(f) 里 f 从未定义，10 个
+        # WNM 用例全部 NameError。
+        self.wmdrv2_data = load_test_json('test_wmdrv2.json')
 
     def test_required_properties(self):
         message = wnm.create_wnm(self.wmdrv2_data)
