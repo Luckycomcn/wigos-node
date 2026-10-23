@@ -1,6 +1,6 @@
 from django.urls import include, path
 
-from . import auth, interop, mvp, views
+from . import auth, checks, interop, mvp, registry, views
 from .views import Wmdrv2BatchView, Wmdrv2ByWsiView, Wmdrv2View
 
 urlpatterns = [
@@ -16,7 +16,11 @@ urlpatterns = [
     path("wmdrv2/<int:station_id>/archive", mvp.StationArchiveView.as_view(), {"action": "archive"}, name="wmdrv2-archive"),
     path("wmdrv2/<int:station_id>/restore", mvp.StationArchiveView.as_view(), {"action": "restore"}, name="wmdrv2-restore"),
     path("wmdrv2/<int:station_id>/history/", mvp.StationHistoryView.as_view(), name="wmdrv2-history"),
+    # diff 放在 <int:version> 之前注册，避免歧义（虽然 <int:> 匹配不到 "diff"）
+    path("wmdrv2/<int:station_id>/history/diff", mvp.StationHistoryDiffView.as_view(), name="wmdrv2-history-diff"),
     path("wmdrv2/<int:station_id>/history/<int:version>", mvp.StationHistoryView.as_view(), name="wmdrv2-history-version"),
+    # 方案 5.6 工作流：草稿提交后才可发布
+    path("wmdrv2/<int:station_id>/submit", mvp.StationSubmitView.as_view(), name="wmdrv2-submit"),
     path("wmdrv2/<int:station_id>/publish", mvp.StationPublishView.as_view(), name="wmdrv2-publish"),
     path("wmdrv2/<int:station_id>/publications/", mvp.PublicationListView.as_view(), name="wmdrv2-publications"),
     path("wmdrv2/",  Wmdrv2View.as_view() , name="wmdrv2"), # POST
@@ -46,6 +50,14 @@ urlpatterns = [
     # F-13 providers: several organisations per record
     path("wmdrv2/<int:station_id>/providers/", interop.StationProviderView.as_view(), name="wmdrv2-providers"),
     path("providers/<int:provider_id>/", interop.ProviderDetailView.as_view(), name="provider-detail"),
+    # F-9：发布前自检（业务规则 + 受控词表 + 可选 pywmdr ETS）
+    path("validate/", checks.ValidateView.as_view(), name="validate"),
+    # 方案 5.3：WSI 注册表与发布权威性 + NF-6 操作审计
+    path("wsi-allocations/", registry.WsiAllocationListCreateView.as_view(), name="wsi-allocations"),
+    path("wsi-allocations/import", registry.WsiAllocationImportView.as_view(), name="wsi-allocations-import"),
+    path("wsi-allocations/export", registry.WsiAllocationExportView.as_view(), name="wsi-allocations-export"),
+    path("wsi-allocations/<int:allocation_id>/", registry.WsiAllocationDetailView.as_view(), name="wsi-allocation-detail"),
+    path("audit/", registry.AuditLogListView.as_view(), name="audit-log"),
     # JSON auth endpoints for the SPA (the DRF HTML login stays at auth/ below)
     path("csrf/", auth.csrf, name="auth-csrf"),
     path("login/", auth.login, name="auth-login"),

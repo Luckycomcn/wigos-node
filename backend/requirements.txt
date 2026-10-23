@@ -7,3 +7,6 @@ requests==2.32.3
 jsonpath-ng==1.8.0
 django-guardian==3.4.0
 jsonschema[format-nongpl]==4.26.0
+# 方案 5.5 选项一：节点经本地代理向 WIS2 全局代理发布 WNM。
+# 未安装也不影响运行 —— api/publishers.py 会把该通道报为不可用。
+paho-mqtt==2.1.0

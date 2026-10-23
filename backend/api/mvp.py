@@ -17,7 +17,8 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from . import stations
+from . import publishers, registry, rules, stations
+from .diffing import diff_records
 from .models import (
     PublishedRecord,
     Station,
@@ -38,6 +39,17 @@ logger = logging.getLogger(__name__)
 # --------------------------------------------------------------------------- #
 def _can_change(user, station):
     return user.is_authenticated and user.has_perm("change_station", station)
+
+
+def _can_view(user, station):
+    """只读权限：能改的人当然能看，另外显式拿到 view_station 的只读角色也能看。
+
+    上游只 assign 了 change_station，所以这里不能只查 view_station，否则连
+    站点所有者都读不到自己的历史。
+    """
+    if not user.is_authenticated:
+        return False
+    return user.has_perm("change_station", station) or user.has_perm("view_station", station)
 
 
 def _station_or_error(station_id):
@@ -106,6 +118,8 @@ class StationHistoryView(APIView):
         station, error = _station_or_error(station_id)
         if error:
             return error
+        if not _can_view(request.user, station):
+            return Response({"detail": "You do not have permission to read this station."}, status=403)
         if version is None:
             rows = station.versions.order_by("-version")
             return Response([
@@ -123,6 +137,69 @@ class StationHistoryView(APIView):
             return Response({"detail": f"Version {version} not found"}, status=404)
         return Response({"version": snapshot.version, "operation": snapshot.operation,
                          "created": snapshot.created, "wmdrv2": snapshot.wmdrv2})
+
+
+class StationHistoryDiffView(APIView):
+    """F-8 变更对比：`?from=<旧版本>&to=<新版本>`，返回路径级差异。
+
+    两个参数都可省略：都不给时对比「上一版 → 最新版」；只给 to 时从最早版本
+    开始；只给 from 时对比到最新版。
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, station_id):
+        station, error = _station_or_error(station_id)
+        if error:
+            return error
+        if not _can_view(request.user, station):
+            return Response({"detail": "You do not have permission to read this station."}, status=403)
+
+        versions = list(station.versions.order_by("version"))
+        if not versions:
+            return Response({"detail": "This station has no versions yet."}, status=404)
+
+        selected = {}
+        for name in ("from", "to"):
+            raw = request.query_params.get(name)
+            if raw is None:
+                selected[name] = None
+                continue
+            try:
+                selected[name] = int(raw)
+            except (TypeError, ValueError):
+                return Response({"detail": f"'{name}' must be an integer version number."}, status=400)
+
+        known = {v.version: v for v in versions}
+        for name in ("from", "to"):
+            if selected[name] is not None and selected[name] not in known:
+                return Response(
+                    {"detail": f"Version {selected[name]} not found. Available: "
+                               f"{min(known)}-{max(known)}."},
+                    status=404,
+                )
+
+        if selected["from"] is None and selected["to"] is None:
+            if len(versions) < 2:
+                return Response({"detail": "Need at least two versions to compare. "
+                                          "Pass ?from= and ?to= explicitly."}, status=400)
+            old, new = versions[-2], versions[-1]
+        else:
+            old = known[selected["from"] if selected["from"] is not None else versions[0].version]
+            new = known[selected["to"] if selected["to"] is not None else versions[-1].version]
+            if old.version == new.version:
+                return Response({"detail": "from and to are the same version; nothing to compare."}, status=400)
+            if old.version > new.version:
+                return Response({"detail": "from must be older than to."}, status=400)
+
+        body = diff_records(old.wmdrv2, new.wmdrv2)
+        body.update({
+            "station_id": station.id,
+            "wsi": station.wigos_identifier,
+            "from": old.version,
+            "to": new.version,
+        })
+        return Response(body)
 
 
 # --------------------------------------------------------------------------- #
@@ -376,6 +453,72 @@ class GradeEvaluateView(APIView):
 # --------------------------------------------------------------------------- #
 # publishing (WNM + web storage)  — the node→catalogue gap
 # --------------------------------------------------------------------------- #
+class StationSubmitView(APIView):
+    """方案 5.6 工作流：草稿 → 提交 → 校验 → 发布。
+
+    提交是把草稿交出去的那一步，所以在这里把关：schema 有问题就退回去改，
+    业务规则不通过也退回去。通过之后记录才进入 submitted，此后才可发布。
+    允许醒目的 README 式提示 —— 取消/退回由编辑者自己决定是否编辑内容。
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, station_id):
+        station, error = _station_or_error(station_id)
+        if error:
+            return error
+        if not _can_change(request.user, station):
+            return Response(
+                {"detail": "You do not have permission to submit this station."}, status=403
+            )
+
+        if station.status != Station.DRAFT:
+            return Response(
+                {"status": station.status, "already_submitted": station.status == Station.SUBMITTED},
+                status=200,
+            )
+
+        # 1) WMDR2 schema —— 草稿容忍的问题，在这里必须已经修好
+        schema_problems = stations.validate(station.wmdrv2, strict=False)
+        if schema_problems:
+            registry.audit(
+                "submit_rejected", station=station, user=request.user,
+                reason="schema", errors=schema_problems[:10],
+            )
+            return Response(
+                {"detail": "The record does not yet satisfy the WMDR2 schema.",
+                 "reason": "schema", "errors": schema_problems},
+                status=400,
+            )
+
+        # 2) 业务规则 —— 与发布用同一套口径，避免"提交了才发现发不出去"
+        rule_result = rules.check_record(station.wmdrv2)
+        if not rule_result["ok"]:
+            registry.audit(
+                "submit_rejected", station=station, user=request.user,
+                reason="business_rules",
+                errors=[item["code"] for item in rule_result["errors"]],
+            )
+            return Response(
+                {"detail": "This record does not pass the WMDR2 business rules.",
+                 "reason": "business_rules", "errors": rule_result["errors"],
+                 "warnings": rule_result["warnings"]},
+                status=400,
+            )
+
+        station.status = Station.SUBMITTED
+        station.save(update_fields=["status"])
+        registry.audit(
+            "submit", station=station, user=request.user,
+            wsi=station.wigos_identifier,
+            warnings=[item["code"] for item in rule_result["warnings"]],
+        )
+        return Response(
+            {"status": station.status, "submitted": True,
+             "warnings": rule_result["warnings"]},
+            status=200,
+        )
+
+
 class StationPublishView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -386,10 +529,64 @@ class StationPublishView(APIView):
         if not _can_change(request.user, station):
             return Response({"detail": "You do not have permission to publish this station."}, status=403)
 
+        # 方案 5.6：只有提交过的记录可以发布。草稿允许内容不完整，放出去就
+        # 会把不合格的数据灌进目录，所以在本地就挡住。
+        if station.status == Station.DRAFT:
+            registry.audit(
+                "publish_rejected", station=station, user=request.user,
+                reason="draft", wsi=station.wigos_identifier,
+            )
+            return Response(
+                {"detail": "Draft records cannot be published. Submit them first "
+                           "(POST /api/wmdrv2/<id>/submit).",
+                 "reason": "draft", "status": station.status},
+                status=403,
+            )
+
+        # 方案 5.3：发布权威性。目标 WSI 必须落在本 centre-id 的授权范围内，
+        # 否则本地直接拒绝——超范围发布在本地即被拒绝并留痕（NF-6）。
+        # WNM_REQUIRE_ALLOCATION=false 时跳过，仅用于把未登记的历史数据先跑起来。
+        if registry.allocation_enforced():
+            allowed, reason, offenders = registry.check_wsi_allocation(station)
+            if not allowed:
+                registry.audit(
+                    "publish_rejected", station=station, user=request.user,
+                    reason=reason, offenders=offenders,
+                )
+                if reason == "malformed":
+                    detail = ("These WIGOS identifiers are not well formed and cannot be "
+                              f"checked against the registry: {offenders}")
+                else:
+                    detail = ("These WIGOS identifiers are outside the allocation granted to "
+                              f"this node: {offenders}. Import the WSI registry first "
+                              "(POST /api/wsi-allocations/import).")
+                return Response({"detail": detail, "reason": reason, "offenders": offenders}, status=403)
+
         operation = (request.data or {}).get("operation", "canonical")
         op = {"canonical": CREATE, "create": CREATE, "update": UPDATE}.get(operation)
         if op is None:
             return Response({"detail": "operation must be canonical or update"}, status=400)
+
+        # F-9：业务规则 + 受控词表。schema 合法不等于业务上说得通，所以在真正
+        # 生成 WNM 之前先自检；WNM_ENFORCE_RULES=false 可降级为只警告。
+        rule_result = rules.check_record(station.wmdrv2)
+        if not rule_result["ok"] and str(
+            getattr(settings, "WNM_ENFORCE_RULES", "true")
+        ).lower() == "true":
+            registry.audit(
+                "publish_rejected", station=station, user=request.user,
+                reason="business_rules",
+                errors=[item["code"] for item in rule_result["errors"]],
+            )
+            return Response(
+                {
+                    "detail": "This record does not pass the WMDR2 business rules.",
+                    "reason": "business_rules",
+                    "errors": rule_result["errors"],
+                    "warnings": rule_result["warnings"],
+                },
+                status=400,
+            )
 
         try:
             wnm = create_station_wnm(station, operation=op)
@@ -411,19 +608,29 @@ class StationPublishView(APIView):
             published_by=request.user,
         )
 
-        # Optional fan-out to a catalogue/broker endpoint (best effort, offline-safe).
-        publish_url = getattr(settings, "WNM_PUBLISH_URL", "")
-        delivered = False
-        if publish_url:
-            try:
-                import requests
-                requests.post(publish_url, json=wnm, timeout=10).raise_for_status()
-                delivered = True
-            except Exception as exc:  # pragma: no cover - network dependent
-                logger.warning("WNM delivery to %s failed: %s", publish_url, exc)
+        # 方案 5.5：按 WNM_PUBLISH_STRATEGY 投递到本地代理/全局代理/本国 WIS2
+        # 节点/直连目录。每条通道独立成败，本地发布本身不受影响。
+        delivery = publishers.deliver(wnm)
+        delivered_channels = publishers.delivered_channels(delivery)
 
-        return Response({"published": True, "url": url, "delivered": delivered,
-                         "publication_id": record.id, "wnm": wnm}, status=201)
+        registry.audit(
+            "publish", station=station, user=request.user,
+            operation=operation, url=url, delivered=bool(delivered_channels),
+            channels=delivered_channels, wsi=station.wigos_identifier,
+        )
+
+        return Response(
+            {
+                "published": True,
+                "url": url,
+                "delivered": bool(delivered_channels),
+                "publication_id": record.id,
+                "wnm": wnm,
+                # 逐通道明细，便于运维判断是代理不通还是 WIS2 节点拒收
+                "delivery": [item.as_dict() for item in delivery],
+            },
+            status=201,
+        )
 
 
 class PublicationListView(APIView):

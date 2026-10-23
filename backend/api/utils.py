@@ -1,5 +1,9 @@
+import logging
+
 from django.contrib.gis.geos import Point
 from jsonpath_ng import parse
+
+logger = logging.getLogger(__name__)
 
 location_expression = parse('$.geometry.coordinates')
 
@@ -14,6 +18,6 @@ def update_station_geometry(station,wmdrv2_data):
         raise ValueError("Missing required field 'location' in wmdrv2 JSON data")
 
     x,y = location_value[0].value[0], location_value[0].value[1]
-    print(f"Updating station geometry of {station} to Point({x}, {y})")
+    logger.debug("Updating station geometry of %s to Point(%s, %s)", station, x, y)
 
     station.location = Point(x=x, y=y, srid=4326)

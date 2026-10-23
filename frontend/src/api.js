@@ -164,11 +164,34 @@ export async function getStationVersion(stationId, version) {
   })), "Failed to load version");
 }
 
+/**
+ * F-8 变更对比。from/to 都可省略：都不给时后端对比「上一版 → 最新版」。
+ */
+export async function getStationHistoryDiff(stationId, from, to) {
+  const params = new URLSearchParams();
+  if (from != null) params.set("from", String(from));
+  if (to != null) params.set("to", String(to));
+  const qs = params.toString();
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/wmdrv2/${stationId}/history/diff${qs ? `?${qs}` : ""}`, {
+    credentials: "include",
+  })), "Failed to load diff");
+}
+
 export async function publishStation(stationId, operation = "canonical") {
   return jsonOrThrow(handle401(await fetch(`${API_URL}/api/wmdrv2/${stationId}/publish`, {
     method: "POST", credentials: "include", headers: jsonHeaders(),
     body: JSON.stringify({ operation }),
   })), "Failed to publish station");
+}
+
+/**
+ * 方案 5.6：草稿 → 提交 → 校验 → 发布。草稿不可发布，提交后才行。
+ * 服务端会把把关结果一并回来：schema 问题或业务规则不通过都是 400。
+ */
+export async function submitStation(stationId) {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/wmdrv2/${stationId}/submit`, {
+    method: "POST", credentials: "include", headers: jsonHeaders(),
+  })), "Failed to submit station");
 }
 
 export async function listGroups() {
@@ -321,4 +344,75 @@ export async function removeProvider(providerId) {
     throw new Error(data.detail || `Failed to remove provider: ${res.status}`);
   }
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// 方案 5.3：WSI 注册表（centre-id ↔ WSI 授权范围）+ NF-6 审计
+// ---------------------------------------------------------------------------
+
+export async function listWsiAllocations({ issuer = "" } = {}) {
+  const qs = issuer ? `?issuer=${encodeURIComponent(issuer)}` : "";
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/wsi-allocations/${qs}`, {
+    credentials: "include",
+  })), "Failed to load WSI allocations");
+}
+
+export async function createWsiAllocation({ issuer, series = 0, numberFrom, numberTo, note = "" }) {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/wsi-allocations/`, {
+    method: "POST", credentials: "include", headers: jsonHeaders(),
+    body: JSON.stringify({ issuer, series, numberFrom, numberTo, note }),
+  })), "Failed to create allocation");
+}
+
+export async function updateWsiAllocation(id, patch) {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/wsi-allocations/${id}/`, {
+    method: "PATCH", credentials: "include", headers: jsonHeaders(),
+    body: JSON.stringify(patch),
+  })), "Failed to update allocation");
+}
+
+export async function deleteWsiAllocation(id) {
+  const res = handle401(await fetch(`${API_URL}/api/wsi-allocations/${id}/`, {
+    method: "DELETE", credentials: "include", headers: { ...csrfHeader() },
+  }));
+  if (!res.ok && res.status !== 204) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || `Failed to delete allocation: ${res.status}`);
+  }
+  return true;
+}
+
+export async function exportWsiAllocations(format = "json") {
+  const res = handle401(await fetch(`${API_URL}/api/wsi-allocations/export?format=${format}`, {
+    credentials: "include",
+  }));
+  if (!res.ok) throw new Error(`Failed to export allocations: ${res.status}`);
+  return res.blob();
+}
+
+export async function importWsiAllocations(payload) {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/wsi-allocations/import`, {
+    method: "POST", credentials: "include", headers: jsonHeaders(),
+    body: JSON.stringify(payload),
+  })), "Failed to import allocations");
+}
+
+export async function listAuditLog({ action = "", station = "", limit = 200 } = {}) {
+  const params = new URLSearchParams();
+  if (action) params.set("action", action);
+  if (station) params.set("station", String(station));
+  params.set("limit", String(limit));
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/audit/?${params.toString()}`, {
+    credentials: "include",
+  })), "Failed to load audit log");
+}
+
+/**
+ * F-9 发布前自检。records 传数组；ets=true 时附带 pywmdr ETS（未安装会自动降级）。
+ */
+export async function validateRecords(records, { ets = false } = {}) {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/validate/`, {
+    method: "POST", credentials: "include", headers: jsonHeaders(),
+    body: JSON.stringify({ records, ets }),
+  })), "Validation failed");
 }

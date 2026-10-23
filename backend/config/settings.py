@@ -109,6 +109,25 @@ WNM_STORAGE_URL = os.environ.get("WNM_STORAGE_URL", "https://wigosnode.test.wis2
 WNM_STORAGE_DIR = os.environ.get("WNM_STORAGE_DIR", str(BASE_DIR / "webstorage"))
 WNM_PUBLISH_URL = os.environ.get("WNM_PUBLISH_URL", "")
 
+# 方案 5.5 发布链路：逗号分隔启用哪些投递通道，可选 http / mqtt / wis2node。
+# 留空表示只本地发布（离线可用、不外发）。
+#   http      —— 直连目录或中介端点，即原有的 WNM_PUBLISH_URL 行为
+#   mqtt      —— 选项一：节点 → 本地代理 → 全局代理
+#   wis2node  —— 选项二：节点 → 本国 WIS2 节点 → 全局代理
+WNM_PUBLISH_STRATEGY = os.environ.get("WNM_PUBLISH_STRATEGY", "")
+
+# 选项一：本地 MQTT 代理。留空时该通道跳过（不需要额外 pip 包也能跑）。
+WIS2_BROKER_HOST = os.environ.get("WIS2_BROKER_HOST", "")
+WIS2_BROKER_PORT = int(os.environ.get("WIS2_BROKER_PORT", "1883") or 1883)
+WIS2_BROKER_USERNAME = os.environ.get("WIS2_BROKER_USERNAME", "")
+WIS2_BROKER_PASSWORD = os.environ.get("WIS2_BROKER_PASSWORD", "")
+WIS2_BROKER_TLS = os.environ.get("WIS2_BROKER_TLS", "false").lower() == "true"
+WIS2_TOPIC_TEMPLATE = os.environ.get("WIS2_TOPIC_TEMPLATE", "origin/a/wigos/{centre_id}/metadata")
+
+# 选项二：本国 WIS2 节点的接收端点（地址需与 WIS2 节点运维方确认）。
+WIS2_NODE_URL = os.environ.get("WIS2_NODE_URL", "")
+WIS2_NODE_TOKEN = os.environ.get("WIS2_NODE_TOKEN", "")
+
 REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.AllowAny",

@@ -8,11 +8,13 @@ import {
   listMyStations,
   publishStation,
   restoreStation,
+  submitStation,
 } from "../api";
 import StationsMap from "./StationsMap.vue";
 import SelectionBar from "./SelectionBar.vue";
 import HistoryDialog from "./HistoryDialog.vue";
 import ToolsPanel from "./ToolsPanel.vue";
+import WsiRegistryPanel from "./WsiRegistryPanel.vue";
 
 // `selected` (a Set of station IDs) is kept by the parent so it survives a
 // trip to the batch wizard and back.
@@ -35,6 +37,7 @@ const historyOpen = ref(false);
 const historyStationId = ref(null);
 const toolsOpen = ref(false);
 const toolsTab = ref("import");
+const registryOpen = ref(false);
 
 async function load() {
   loadState.value = { status: "loading" };
@@ -66,6 +69,11 @@ const onArchive = (station) => run(() => archiveStation(station.station_id), () 
 const onRestore = (station) => run(() => restoreStation(station.station_id), () => `Restored ${station.wsi}.`);
 const onPublish = (station) =>
   run(() => publishStation(station.station_id), (r) => `Published ${station.wsi} → ${r.url}`);
+
+// 方案 5.6：草稿必须先提交。服务端会在提交时跑 schema 与业务规则，
+// 不通过就退回草稿态并把原因带回来。
+const onSubmit = (station) =>
+  run(() => submitStation(station.station_id), () => `Submitted ${station.wsi} — ready to publish.`);
 
 async function onDelete(station) {
   if (!window.confirm(`Permanently delete ${station.wsi}? This cannot be undone. Prefer Archive.`)) return;
@@ -125,6 +133,7 @@ const rowProps = ({ item }) => ({ class: selectedIds.value.includes(item.station
         </v-menu>
         <v-btn variant="tonal" prepend-icon="mdi-upload" @click="openTools('import')">Import</v-btn>
         <v-btn variant="tonal" prepend-icon="mdi-tools" @click="openTools('templates')">Tools</v-btn>
+        <v-btn variant="tonal" prepend-icon="mdi-shield-key" @click="registryOpen = true">WSI registry</v-btn>
         <v-btn color="primary" prepend-icon="mdi-plus" @click="emit('new')">New station</v-btn>
       </div>
     </div>
@@ -170,7 +179,9 @@ const rowProps = ({ item }) => ({ class: selectedIds.value.includes(item.station
           />
         </template>
         <template #[`item.state`]="{ item }">
-          <v-chip v-if="item.archived" size="small" color="warning" variant="tonal">Archived</v-chip>
+          <!-- 方案 5.6：三个独立状态，草稿优先 —— 它就是还需要用户动手的信号。 -->
+          <v-chip v-if="item.status === 'draft'" size="small" color="warning" variant="flat">Draft</v-chip>
+          <v-chip v-else-if="item.archived" size="small" color="warning" variant="tonal">Archived</v-chip>
           <v-chip v-else size="small" color="success" variant="tonal">Active</v-chip>
         </template>
         <template #[`item.actions`]="{ item }">
@@ -187,7 +198,17 @@ const rowProps = ({ item }) => ({ class: selectedIds.value.includes(item.station
                 <v-list-item title="XML" @click="onExportOne(item, 'xml')" />
               </v-list>
             </v-menu>
-            <v-btn v-if="!item.archived && item.can_edit" variant="tonal" color="primary" size="small" :disabled="busy" @click="onPublish(item)">Publish</v-btn>
+            <!-- 草稿只能先提交；让它看起来可点、点了才报错，是很难用的设计。 -->
+            <v-btn
+              v-if="item.status === 'draft' && !item.archived && item.can_edit"
+              variant="tonal" color="warning" size="small" :disabled="busy"
+              @click="onSubmit(item)"
+            >Submit</v-btn>
+            <v-btn
+              v-else-if="!item.archived && item.can_edit"
+              variant="tonal" color="primary" size="small" :disabled="busy"
+              @click="onPublish(item)"
+            >Publish</v-btn>
             <v-btn v-if="!item.archived && item.can_edit" variant="tonal" size="small" :disabled="busy" @click="onArchive(item)">Archive</v-btn>
             <v-btn v-if="item.archived && item.can_edit" variant="tonal" size="small" :disabled="busy" @click="onRestore(item)">Restore</v-btn>
             <v-btn v-if="item.can_edit" variant="text" color="error" size="small" :disabled="busy" @click="onDelete(item)">Delete</v-btn>
@@ -198,6 +219,8 @@ const rowProps = ({ item }) => ({ class: selectedIds.value.includes(item.station
 
     <HistoryDialog v-model="historyOpen" :station-id="historyStationId" />
     <ToolsPanel v-model="toolsOpen" :station-ids="selectedIds" :initial-tab="toolsTab" @imported="load" />
+    <!-- 方案 5.3：WSI 授权范围 + NF-6 审计。面板内部自行降级，非 staff 只看得到分配表。 -->
+    <WsiRegistryPanel v-model="registryOpen" />
   </v-card>
 </template>
 

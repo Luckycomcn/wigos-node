@@ -62,6 +62,14 @@ def my_stations(request):
     if not include_archived:
         my_stations = my_stations.filter(archived=False)
     editable = stations.editable_station_ids(request.user)
+
+    # 方案 5.6：草稿是未完成的工作，不该出现在别人的列表里。
+    # 只有能改这条记录的人（owner / issuer 组 / 超管）看得到自己的草稿。
+    visible = [
+        station
+        for station in my_stations
+        if station.status != Station.DRAFT or station.id in editable
+    ]
     return Response([
         {
             "station_id": station.id,
@@ -71,8 +79,9 @@ def my_stations(request):
             "longitude": station.location.x,
             "can_edit": station.id in editable,
             "archived": station.archived,
+            "status": station.status,
         }
-        for station in my_stations
+        for station in visible
     ])
 
 @api_view(["GET"])
@@ -132,11 +141,18 @@ class Wmdrv2View(APIView):
             return Response({"detail": f"Station {station_id} not found"}, status=404)
 
         try:
-            stations.update_station(request.user, station, request.data)
+            stations.update_station(request.user, station, request.data,
+                                    status=request.query_params.get("status"))
         except StationError as e:
             return _error_response(e)
 
-        return Response({"message": f"WMDv2 data for station {station_id} updated successfully."}, status=200)
+        return Response({
+            "message": f"WMDv2 data for station {station_id} updated successfully.",
+            "station_id": station.id,
+            "status": station.status,
+            # 草稿才可能有 schema 问题（严格模式下 validate 早抛 400 了）
+            "schema_problems": getattr(station, "schema_problems", []),
+        }, status=200)
 
     def post(self, request, station_id=None):
         if station_id is not None:
@@ -146,11 +162,17 @@ class Wmdrv2View(APIView):
             )
 
         try:
-            station = stations.create_station(request.user, request.data)
+            station = stations.create_station(request.user, request.data,
+                                              status=request.query_params.get("status"))
         except StationError as e:
             return _error_response(e)
 
-        return Response({"message": f"Station {station.id} created successfully.", "station_id": station.id}, status=201)
+        return Response({
+            "message": f"Station {station.id} created successfully.",
+            "station_id": station.id,
+            "status": station.status,
+            "schema_problems": getattr(station, "schema_problems", []),
+        }, status=201)
 
     def delete(self, request, station_id=None):
         """F-19: hard delete. Archive (/archive) is the reversible option; only
