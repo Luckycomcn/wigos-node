@@ -9,6 +9,8 @@ __pycache__/
 venv/
 backend/staticfiles/
 backend/db.sqlite3
+# WNM publish 端点写出的消息文件（webstorage 运行时产物）
+backend/webstorage/
 
 # node
 node_modules/

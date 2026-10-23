@@ -10,9 +10,10 @@ from django.conf import settings
 from django.contrib.gis.geos import Polygon
 from django.db import transaction
 from django.db.models import Q
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -700,3 +701,44 @@ class OgcItemView(APIView):
         if station is None:
             return Response({"detail": f"No station with WIGOS identifier {wsi}"}, status=404)
         return Response(station.wmdrv2)
+
+
+class WebstorageView(APIView):
+    """公开只读的 WIS2 风格 webstorage。
+
+    `POST /api/wmdrv2/<id>/publish` 把 WMDR2 字节写到 ``WNM_STORAGE_DIR``，并把
+    ``WNM_STORAGE_URL + filename`` 作为消息里的 ``links[].href`` 发出去。如果没
+    有这个视图，那条链接就是 404 —— 节点→目录 的发布链路在演示里是断的。
+
+    语义按 WIS2 惯例：消息文件本就是公开可下载的，所以匿名可读、只允许 GET/HEAD。
+    """
+
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    http_method_names = ["get", "head"]
+
+    def get(self, request, filename):
+        # <str:filename> 已排除 "/"，这里再挡掉 ".." 与隐藏文件
+        if filename.startswith(".") or Path(filename).name != filename:
+            return Response({"detail": "invalid filename"}, status=400)
+
+        storage_dir = Path(getattr(settings, "WNM_STORAGE_DIR", settings.BASE_DIR / "webstorage"))
+        target = storage_dir / filename
+        if not target.is_file():
+            return Response({"detail": f"not found: {filename}"}, status=404)
+
+        payload = target.read_bytes()
+        response = HttpResponse(payload, content_type="application/geo+json")
+        response["Content-Length"] = str(len(payload))
+        response["Cache-Control"] = "public, max-age=60"
+        return response
+
+    def head(self, request, filename):
+        """HEAD 保留响应头（含 Content-Length），但不返回 body。"""
+        response = self.get(request, filename)
+        if isinstance(response, HttpResponse):
+            length = response.get("Content-Length", "")
+            response.content = b""
+            if length:
+                response["Content-Length"] = length
+        return response
