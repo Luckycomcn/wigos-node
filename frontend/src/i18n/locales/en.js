@@ -32,6 +32,34 @@ export default {
     requestFailed: "API request failed: {status}",
     codelistFailed: "Failed to load codelist {scheme}: {status}",
     loginFailed: "Login failed: {status}",
+    // Wording the API returns in `detail`. Recognised server messages are
+    // shown through these so they can follow the UI language; see
+    // i18n/backendMessages.js for why this is a translation table rather than
+    // a change to the responses themselves.
+    backend: {
+      recordNotObject: "The record must be a JSON object.",
+      invalidRecord: "The record is not valid against the WMDR2 schema.",
+      wsiInUse: "WIGOS identifier '{wsi}' is already in use in another station.",
+      wsiInUseAdditional: "WIGOS identifier '{wsi}' is already in use in the additional identifiers of another station.",
+      stationNotFound: "Station {station} not found.",
+      stationNotFoundByWsi: "No station with WIGOS identifier {wsi}.",
+      noPermissionForIssuer: "You do not have permission to {action} a station for the issuer of identifier {issuer}.",
+      noPermissionToChange: "You do not have permission to change this station.",
+      action: { create: "create", update: "update" },
+      batchNoStationIds: "Provide one or more numeric station_id parameters.",
+      batchReadLimit: "At most {limit} stations can be read at once.",
+      batchUpdateLimit: "At most {limit} updates are allowed per request.",
+      batchPayloadShape: 'Expected { "dry_run": bool, "updates": [...] }.',
+      batchNeedsStationId: "A numeric station_id is required. Batch operations never create stations.",
+      saveFailed: "The station could not be saved: {reason}",
+      badCredentials: "Invalid username or password.",
+      notAuthenticated: "Not authenticated.",
+      noWigosIds: "No WIGOS identifiers provided.",
+      geojsonNotFeature: "The payload must be a GeoJSON Feature.",
+      noCachedCodelist: "No cached codelist for '{scheme}'.",
+      stationCreated: "Station {station} created successfully.",
+      stationUpdated: "Station {station} updated successfully.",
+    },
   },
   // Validation messages from the WMDR2 JSON Schema (wmdrSchema.js). Each one
   // is appended to a field path, e.g. "geometry.longitude must be number".
@@ -280,6 +308,10 @@ export default {
   },
   map: {
     enterCoordinates: "Enter latitude/longitude to preview the point.",
+    // Leaflet's own zoom buttons; it only reads these when the control is
+    // built, so leafletMap.js sets them explicitly.
+    zoomIn: "Zoom in",
+    zoomOut: "Zoom out",
   },
   observations: {
     noDetails: "No details yet",
