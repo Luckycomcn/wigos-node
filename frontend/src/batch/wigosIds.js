@@ -59,5 +59,5 @@ export const ownIdsInRows = (rows) =>
 // Shown on a station's row when it has IDs beyond the editable slots.
 export const rowNote = (row) =>
   row.extraAdditionalIds?.length
-    ? `Also has ${row.extraAdditionalIds.join(", ")} (kept as is; only ${MAX_ADDITIONAL_IDS} additional IDs are editable here)`
+    ? translate("wigos.extraIds", { ids: row.extraAdditionalIds.join(", "), max: MAX_ADDITIONAL_IDS })
     : null;
