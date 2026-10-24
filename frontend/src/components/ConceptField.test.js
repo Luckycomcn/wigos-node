@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import { createVuetify } from "vuetify";
+import i18n from "../i18n";
 import ConceptField from "./ConceptField.vue";
 
 const option = (code, label) => ({ code, label, id: `http://codes.wmo.int/wmdr/X/${code}` });
@@ -67,5 +68,22 @@ describe("ConceptField", () => {
     mountField({ modelValue: null });
     await wrapper.find("input").setValue("12345");
     expect(lastEmitted()).toEqual({ id: "12345" });
+  });
+
+  it("shows the codelist name in the UI language but stores the English one", async () => {
+    i18n.global.locale.value = "zh-CN";
+    try {
+      const land = option("landFixed", "Land (fixed)");
+      mountField({ options: [land], scheme: "FacilityType", modelValue: null });
+      // What the user reads...
+      expect(wrapper.findComponent({ name: "VSelect" }).props("items")[0].title).toBe("陆地（固定）");
+
+      // ...and what the record keeps: the label the API and other WMO tools
+      // read. A record saved in Chinese must match one saved in English.
+      await wrapper.findComponent({ name: "VSelect" }).vm.$emit("update:modelValue", land.id);
+      expect(lastEmitted()).toEqual({ id: "landFixed", title: "Land (fixed)", url: land.id });
+    } finally {
+      i18n.global.locale.value = "en";
+    }
   });
 });
