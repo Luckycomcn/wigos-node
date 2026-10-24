@@ -1,6 +1,7 @@
 import { WIGOS_ID_PATTERN } from "../wmdr";
 import { codelistOptions } from "../codelists";
-import { translate } from "../i18n/plain";
+import { activeLocale, translate } from "../i18n/plain";
+import { codelistText } from "../i18n/codelistNames";
 import { toCsv } from "../csv";
 
 // Shared pieces of the batch operations. A grid row is
@@ -97,10 +98,11 @@ export function conceptForCell(text, options, previous) {
   return opt ? conceptFromOption(opt) : { id: value };
 }
 
-// Label shown in the grid for a codelist cell.
-export function codelistLabel(options, text) {
+// Label shown in the grid for a codelist cell, in the UI language. The stored
+// cell keeps the notation, so this is display only.
+export function codelistLabel(options, text, scheme) {
   const opt = findCodelistOption(options, text);
-  return opt ? opt.label : text;
+  return opt ? codelistText(scheme, opt, activeLocale()) : text;
 }
 
 // Normalizes a typed, pasted or imported value: codelist labels become
