@@ -50,7 +50,7 @@ export const columns = [
   },
   { key: "date_start", label: "col.from", kind: "date", lockedOnExisting: true, width: 120 },
   { key: "reporting_status", label: "col.reportingStatus", kind: "codelist", codelist: "reportingStatus", width: 170 },
-  { key: "date_end", label: "col.toEmptyOngoing", kind: "date", width: 120 },
+  { key: "date_end", label: "col.toEmptyOngoing", kind: "date", width: 150 },
 ];
 
 // A file row is matched to a grid row on these columns; when several rows

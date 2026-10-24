@@ -22,3 +22,11 @@ const lookup = (messages, key) => key.split(".").reduce((node, part) => (node &&
 // accepted when importing a spreadsheet, so a file exported in one language
 // still imports in another.
 export const canonical = (value) => (isMessageKey(value) ? lookup(en, value) ?? value : value);
+
+// A batch column's heading in the active language. Resolved at call time, never
+// at module load: a `columns` array is built once when the module is imported,
+// so translating its labels there would freeze them in whatever language the
+// app happened to start in. `labelParams` carries values the key needs (the
+// additional-WIGOS-ID columns number themselves).
+export const columnLabel = (column) =>
+  isMessageKey(column.label) ? translate(column.label, column.labelParams) : column.label;

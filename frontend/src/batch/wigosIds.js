@@ -14,7 +14,7 @@ export const columns = [
   { ...KEY_COLUMNS.wigosId, key: "old_wigos_id", label: "col.currentWigosId" },
   KEY_COLUMNS.stationName,
   { key: "new_wigos_id", label: "col.newWigosIdEmptyKeep", kind: "wsi", width: 200 },
-  ...ADDITIONAL_KEYS.map((key, i) => ({ key, label: translate("col.additionalId", { index: i + 1 }), kind: "wsi", width: 190 })),
+  ...ADDITIONAL_KEYS.map((key, i) => ({ key, label: "col.additionalId", labelParams: { index: i + 1 }, kind: "wsi", width: 190 })),
 ];
 
 // A file row is matched to a grid row on the current ID.

@@ -1,5 +1,5 @@
 <script setup>
-import { translate } from "../../i18n/plain";
+import { columnLabel, translate } from "../../i18n/plain";
 import { computed, ref, watch } from "vue";
 import { cellState, codelistLabel, isCellChanged, isCellEditable, isEditable, normalizeCell } from "../../batch/common";
 import { exportSheet, mergeSheet, pastedTable, readSheet } from "../../batch/sheetIO";
@@ -402,7 +402,7 @@ const importWarning = computed(() => {
               :title="column.lockedOnExisting ? `${column.key}\n${translate('sheet.lockedColumnHint')}` : column.key"
             >
               <v-icon v-if="column.lockedOnExisting" icon="mdi-lock-outline" size="x-small" class="sheet-lock" />
-              {{ translate(column.label) }}<span v-if="column.required" class="required-mark">*</span>
+              {{ columnLabel(column) }}<span v-if="column.required" class="required-mark">*</span>
             </th>
           </tr>
           <tr v-if="selectedIds.size > 0" class="sheet-fill-row">
