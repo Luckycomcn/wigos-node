@@ -1,12 +1,28 @@
 <script setup>
 import { computed, onUnmounted, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { listPublications } from "./api";
 import LoginPage from "./components/LoginPage.vue";
 import PublicationsPage from "./components/PublicationsPage.vue";
 import StationsList from "./components/StationsList.vue";
 import WmdrForm from "./components/WmdrForm.vue";
 import BatchWizard from "./components/batch/BatchWizard.vue";
+import LocaleSwitcher from "./components/LocaleSwitcher.vue";
 import { useAuth } from "./composables/useAuth";
+import { useLocale } from "./composables/useLocale";
+
+const { t } = useI18n();
+const { pending, active } = useLocale();
+
+// The tab title follows the language too; index.html carries the English one
+// for the moment before the app mounts.
+watch(
+  active,
+  () => {
+    document.title = t("app.title");
+  },
+  { immediate: true }
+);
 
 const { status, user, setUser, logout } = useAuth();
 
@@ -67,13 +83,16 @@ async function handleLogout() {
       </template>
       <img class="app-bar-logo" src="./assets/img/logo.png" alt="WMO logo" />
       <div class="app-bar-title">
-        <h1>WMDR Station Record Builder</h1>
+        <h1>{{ t("app.title") }}</h1>
         <!-- On narrower screens it would run into the dark part of the banner. -->
-        <p class="d-none d-lg-block">Fill in station metadata and generate a WIGOS-conformant GeoJSON record.</p>
+        <p class="d-none d-lg-block">{{ t("app.subtitle") }}</p>
       </div>
-      <template v-if="status === 'authenticated'" #append>
-        <span class="app-bar-user mr-3">{{ user.email || user.username }}</span>
-        <v-btn class="app-bar-user" variant="tonal" @click="handleLogout">Log out</v-btn>
+      <template #append>
+        <LocaleSwitcher />
+        <template v-if="status === 'authenticated'">
+          <span class="app-bar-user mr-3">{{ user.email || user.username }}</span>
+          <v-btn class="app-bar-user" variant="tonal" @click="handleLogout">{{ t("app.logout") }}</v-btn>
+        </template>
       </template>
     </v-app-bar>
 
@@ -100,7 +119,11 @@ async function handleLogout() {
 
     <v-main>
       <v-container :class="['app-main', { 'app-main-wide': view.mode === 'batch' }]">
-        <p v-if="status === 'loading'">Loading…</p>
+        <v-alert v-if="pending" class="mb-4" type="info" variant="tonal" density="compact" data-testid="locale-pending">
+          {{ t("locale.pendingNotice", { language: pending }) }}
+        </v-alert>
+
+        <p v-if="status === 'loading'">{{ t("app.loading") }}</p>
 
         <LoginPage v-else-if="status === 'anonymous'" @success="setUser" />
 

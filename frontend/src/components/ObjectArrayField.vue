@@ -27,6 +27,8 @@ function emptyItem(fields) {
 
 <script setup>
 import { computed, inject, ref } from "vue";
+import { useI18n } from "vue-i18n";
+import { useFieldText } from "../i18n/keys";
 import ObjectArrayItemRow from "./ObjectArrayItemRow.vue";
 import { DRILL_INTO } from "./drillInto";
 import { useAutoCollapse } from "../composables/useAutoCollapse";
@@ -46,6 +48,14 @@ const props = defineProps({
 });
 const values = defineModel({ type: Array, required: true });
 const drillInto = inject(DRILL_INTO, null);
+
+const { t } = useI18n();
+const text = useFieldText();
+// Item names arrive as message keys ("External ID"), so the numbered headings
+// and buttons read as "External ID 2" / "新增 External ID" in either language.
+const itemName = computed(() => text(props.itemLabel));
+const newItemLabel = computed(() => t("objectArray.newItem", { item: itemName.value }));
+const itemTitle = (index) => t("objectArray.itemNumber", { item: itemName.value, index: index + 1 });
 
 // All items start collapsed when the form first loads. Items added later
 // via "Add" are not in this set, so they start expanded for editing.
@@ -95,23 +105,23 @@ const atMax = computed(() => props.maxItems != null && values.value.length >= pr
 <template>
   <div class="mb-5">
     <div class="group-label">
-      {{ label }}<span v-if="required" class="required-mark">*</span>
+      {{ text(label) }}<span v-if="required" class="required-mark">*</span>
     </div>
 
     <template v-if="mode === 'summary'">
       <div v-for="(item, i) in values" :key="i" class="summary-row">
-        <span>{{ summaryOf(item, `New ${itemLabel.toLowerCase()}`) }}</span>
+        <span>{{ summaryOf(item, newItemLabel) }}</span>
         <div class="nested-card-header-actions">
           <v-btn
             variant="tonal"
             color="secondary"
             size="small"
             append-icon="mdi-chevron-right"
-            @click="drillInto([...path, i], `${itemLabel} ${i + 1}`, fields)"
+            @click="drillInto([...path, i], itemTitle(i), fields)"
           >
-            Edit details
+            {{ t("objectArray.editDetails") }}
           </v-btn>
-          <v-btn variant="outlined" size="small" @click="remove(i)">Remove</v-btn>
+          <v-btn variant="outlined" size="small" @click="remove(i)">{{ t("common.remove") }}</v-btn>
         </div>
       </div>
     </template>
@@ -119,12 +129,12 @@ const atMax = computed(() => props.maxItems != null && values.value.length >= pr
     <template v-else>
       <div v-for="(item, i) in values" :key="i" :ref="(el) => setCardRef(i, el)" class="nested-card">
         <div class="nested-card-header">
-          <span>{{ summaryOf(item, `${itemLabel} ${i + 1}`) }}</span>
+          <span>{{ summaryOf(item, itemTitle(i)) }}</span>
           <div class="nested-card-header-actions">
             <v-btn variant="outlined" size="small" :aria-expanded="!collapsed.has(i)" @click="toggleCollapsed(i)">
-              {{ collapsed.has(i) ? "Expand" : "Minimize" }}
+              {{ collapsed.has(i) ? t("objectArray.expand") : t("objectArray.minimize") }}
             </v-btn>
-            <v-btn variant="outlined" size="small" @click="remove(i)">Remove</v-btn>
+            <v-btn variant="outlined" size="small" @click="remove(i)">{{ t("common.remove") }}</v-btn>
           </div>
         </div>
         <ObjectArrayItemRow
@@ -138,7 +148,7 @@ const atMax = computed(() => props.maxItems != null && values.value.length >= pr
     </template>
 
     <v-btn v-if="!atMax" variant="tonal" color="secondary" size="small" prepend-icon="mdi-plus" @click="add">
-      Add {{ itemLabel }}
+      {{ t("objectArray.add", { item: itemName }) }}
     </v-btn>
   </div>
 </template>

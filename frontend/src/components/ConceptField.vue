@@ -37,9 +37,9 @@ function matchesQuery(opt, query) {
 }
 
 const DETAIL_FIELDS = [
-  { name: "title", label: "Title" },
-  { name: "url", label: "URL", placeholder: "Concept URI" },
-  { name: "description", label: "Description" },
+  { name: "title", label: "field.title" },
+  { name: "url", label: "field.url", placeholder: "ph.conceptUri" },
+  { name: "description", label: "field.description" },
 ];
 
 // Codelists longer than this get a type-to-filter box instead of a select.
@@ -50,6 +50,8 @@ const CURRENT = "__current__";
 
 <script setup>
 import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
+import { useFieldText } from "../i18n/keys";
 
 const props = defineProps({
   label: { type: String, required: true },
@@ -60,7 +62,10 @@ const props = defineProps({
 });
 const concept = defineModel({ type: Object, default: null });
 
-const fieldLabel = computed(() => (props.required ? `${props.label} *` : props.label));
+const { t } = useI18n();
+const text = useFieldText();
+const labelText = computed(() => text(props.label));
+const fieldLabel = computed(() => (props.required ? `${labelText.value} *` : labelText.value));
 
 // --- Codelist (select / autocomplete)
 
@@ -119,12 +124,12 @@ function updateFreeText(key, text) {
       <v-text-field
         :label="fieldLabel"
         :model-value="concept?.id || ''"
-        :placeholder="placeholder"
+        :placeholder="text(placeholder)"
         :persistent-placeholder="!!placeholder"
-        @update:model-value="(text) => updateFreeText('id', text)"
+        @update:model-value="(text2) => updateFreeText('id', text2)"
       />
       <v-btn variant="outlined" :aria-expanded="showDetails" @click="showDetails = !showDetails">
-        {{ showDetails ? "Hide details" : "Details" }}
+        {{ showDetails ? t("concept.hideDetails") : t("concept.details") }}
       </v-btn>
     </div>
     <template v-if="showDetails">
@@ -132,10 +137,10 @@ function updateFreeText(key, text) {
         v-for="field in DETAIL_FIELDS"
         :key="field.name"
         class="mt-2"
-        :label="field.label"
+        :label="text(field.label)"
         :model-value="concept?.[field.name] || ''"
-        :placeholder="field.placeholder"
-        @update:model-value="(text) => updateFreeText(field.name, text)"
+        :placeholder="text(field.placeholder)"
+        @update:model-value="(value) => updateFreeText(field.name, value)"
       />
     </template>
   </div>
@@ -143,7 +148,7 @@ function updateFreeText(key, text) {
   <v-autocomplete
     v-else-if="searchable"
     :label="fieldLabel"
-    placeholder="Type to filter"
+    :placeholder="t('concept.typeToFilter')"
     :items="items"
     :model-value="selectedValue"
     :custom-filter="filter"
@@ -163,7 +168,7 @@ function updateFreeText(key, text) {
   <v-select
     v-else
     :label="fieldLabel"
-    placeholder="None selected"
+    :placeholder="t('concept.noneSelected')"
     :items="items"
     :model-value="selectedValue"
     clearable

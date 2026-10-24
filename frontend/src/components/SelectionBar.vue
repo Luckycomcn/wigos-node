@@ -5,6 +5,7 @@ export const MAX_BATCH_STATIONS = 500;
 
 <script setup>
 import { computed } from "vue";
+import { useI18n } from "vue-i18n";
 
 // Shown at the top of the station list while stations are selected.
 const props = defineProps({
@@ -13,19 +14,25 @@ const props = defineProps({
 });
 const emit = defineEmits(["select-all", "clear", "batch"]);
 
+const { t } = useI18n();
 const tooMany = computed(() => props.count > MAX_BATCH_STATIONS);
+// English is not the only language with a plural form: pick the message by
+// count instead of gluing a suffix onto a noun.
+const countLabel = computed(() =>
+  props.count === 1 ? t("selection.countOne", { count: props.count }) : t("selection.countMany", { count: props.count })
+);
 </script>
 
 <template>
-  <v-sheet class="selection-bar" role="region" aria-label="Selected stations">
-    <span class="selection-count">{{ count }} {{ count === 1 ? "station" : "stations" }} selected</span>
+  <v-sheet class="selection-bar" role="region" :aria-label="t('selection.region')">
+    <span class="selection-count">{{ countLabel }}</span>
     <v-btn variant="text" color="secondary" :disabled="count === editableCount" @click="emit('select-all')">
-      Select all ({{ editableCount }})
+      {{ t("selection.selectAll", { count: editableCount }) }}
     </v-btn>
-    <v-btn variant="text" color="secondary" @click="emit('clear')">Clear selection</v-btn>
+    <v-btn variant="text" color="secondary" @click="emit('clear')">{{ t("selection.clear") }}</v-btn>
     <v-spacer />
-    <span v-if="tooMany" class="text-error text-body-2">At most {{ MAX_BATCH_STATIONS }} stations per batch.</span>
-    <v-btn color="primary" :disabled="tooMany" @click="emit('batch')">Batch operations</v-btn>
+    <span v-if="tooMany" class="text-error text-body-2">{{ t("selection.tooMany", { max: MAX_BATCH_STATIONS }) }}</span>
+    <v-btn color="primary" :disabled="tooMany" @click="emit('batch')">{{ t("selection.batch") }}</v-btn>
   </v-sheet>
 </template>
 

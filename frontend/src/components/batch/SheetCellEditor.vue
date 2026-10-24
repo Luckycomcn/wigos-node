@@ -1,4 +1,5 @@
 <script setup>
+import { translate } from "../../i18n/plain";
 import { onMounted, ref } from "vue";
 import SheetCodelistOptions from "./SheetCodelistOptions.vue";
 
@@ -61,7 +62,7 @@ function onKeydown(e) {
     @blur="emit('commit', null)"
     @keydown="onKeydown"
   >
-    <option value="">(empty)</option>
+    <option value="">{{ translate("batch.emptyOption") }}</option>
     <SheetCodelistOptions :column="column" :codelists="codelists" :value="value" />
   </select>
   <input

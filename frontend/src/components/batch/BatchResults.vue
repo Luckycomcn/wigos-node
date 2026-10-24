@@ -1,4 +1,5 @@
 <script setup>
+import { translate } from "../../i18n/plain";
 import { computed } from "vue";
 import { resultsToCsv } from "../../batch/common";
 import { csvBlob, downloadBlob } from "../../batch/sheetIO";
@@ -16,39 +17,39 @@ const download = () => downloadBlob(csvBlob(resultsToCsv(props.state.response.re
 
 <template>
   <v-alert v-if="state.status === 'running'" type="info" variant="tonal">
-    Applying changes to {{ state.count }} {{ state.count === 1 ? "station" : "stations" }}…
+    {{ translate(state.count === 1 ? "batch.applyingOne" : "batch.applyingMany", { count: state.count }) }}
   </v-alert>
 
   <div v-else-if="state.status === 'error'">
-    <v-alert type="error" variant="tonal">The changes could not be sent: {{ state.error }}</v-alert>
+    <v-alert type="error" variant="tonal">{{ translate("batch.sendFailed", { message: state.error }) }}</v-alert>
     <div class="batch-actions">
-      <v-btn variant="outlined" @click="emit('back')">Back to stations</v-btn>
-      <v-btn color="primary" @click="emit('retry')">Retry</v-btn>
+      <v-btn variant="outlined" @click="emit('back')">{{ translate("batch.backToStations") }}</v-btn>
+      <v-btn color="primary" @click="emit('retry')">{{ translate("common.retry") }}</v-btn>
     </div>
   </div>
 
   <div v-else>
     <v-alert :type="failed.length ? 'error' : 'success'" variant="tonal" class="mb-3">
-      {{ state.response.summary.ok }} saved, {{ state.response.summary.error }} failed.
+      {{ translate("batch.summary", { ok: state.response.summary.ok, failed: state.response.summary.error }) }}
     </v-alert>
     <v-table class="batch-results">
       <thead>
         <tr>
-          <th>Station</th>
-          <th>WIGOS ID</th>
-          <th>Result</th>
+          <th>{{ translate("col.station") }}</th>
+          <th>{{ translate("col.wigosId") }}</th>
+          <th>{{ translate("batch.columnResult") }}</th>
         </tr>
       </thead>
       <tbody>
         <tr v-for="result in state.response.results" :key="result.index">
-          <td>{{ result.station_name || `Station ${result.station_id}` }}</td>
+          <td>{{ result.station_name || translate("batch.stationNumber", { id: result.station_id }) }}</td>
           <td>{{ result.wsi }}</td>
           <td>
             <v-chip v-if="result.status === 'ok'" size="small" variant="tonal" color="success" prepend-icon="mdi-check">
-              saved
+              {{ translate("batch.resultSaved") }}
             </v-chip>
             <template v-else>
-              <v-chip size="small" variant="tonal" color="error" prepend-icon="mdi-close">failed</v-chip>
+              <v-chip size="small" variant="tonal" color="error" prepend-icon="mdi-close">{{ translate("batch.resultFailed") }}</v-chip>
               {{ result.message }}
               <ul v-if="result.errors?.length > 0" class="error-list text-error">
                 <li v-for="error in result.errors" :key="error">{{ error }}</li>
@@ -59,10 +60,10 @@ const download = () => downloadBlob(csvBlob(resultsToCsv(props.state.response.re
       </tbody>
     </v-table>
     <div class="batch-actions">
-      <v-btn variant="outlined" @click="emit('back')">Back to stations</v-btn>
-      <v-btn variant="tonal" color="secondary" prepend-icon="mdi-download" @click="download">Download results (CSV)</v-btn>
+      <v-btn variant="outlined" @click="emit('back')">{{ translate("batch.backToStations") }}</v-btn>
+      <v-btn variant="tonal" color="secondary" prepend-icon="mdi-download" @click="download">{{ translate("batch.downloadResults") }}</v-btn>
       <v-btn v-if="failed.length > 0" color="primary" @click="emit('retry-failed', failed.map((result) => result.station_id))">
-        Retry {{ failed.length }} failed
+        {{ translate("batch.retryFailed", { count: failed.length }) }}
       </v-btn>
     </div>
   </div>

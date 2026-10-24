@@ -14,6 +14,7 @@ import {
   stationKeys,
 } from "./common";
 import { codelistOptions } from "../codelists";
+import { translate } from "../i18n/plain";
 
 // Programme affiliations: one row per affiliation of one observation.
 //
@@ -31,7 +32,7 @@ const observedProperty = {
   ...KEY_COLUMNS.observedProperty,
   // The station's observations, for an added row.
   choices: (row) => row.observationChoices || [],
-  choiceError: "Not an observation of this station",
+  choiceError: translate("batch.notAnObservation"),
 };
 
 export const columns = [
@@ -40,16 +41,16 @@ export const columns = [
   observedProperty,
   {
     key: "program_affiliation",
-    label: "Programme/network",
+    label: "col.programme",
     kind: "codelist",
     codelist: "programAffiliation",
     required: true,
     lockedOnExisting: true,
     width: 200,
   },
-  { key: "date_start", label: "From", kind: "date", lockedOnExisting: true, width: 120 },
-  { key: "reporting_status", label: "Reporting status", kind: "codelist", codelist: "reportingStatus", width: 170 },
-  { key: "date_end", label: "To (empty if ongoing)", kind: "date", width: 120 },
+  { key: "date_start", label: "col.from", kind: "date", lockedOnExisting: true, width: 120 },
+  { key: "reporting_status", label: "col.reportingStatus", kind: "codelist", codelist: "reportingStatus", width: 170 },
+  { key: "date_end", label: "col.toEmptyOngoing", kind: "date", width: 120 },
 ];
 
 // A file row is matched to a grid row on these columns; when several rows

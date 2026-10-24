@@ -21,14 +21,14 @@ const initialState = () => ({
 });
 
 const EXTERNAL_ID_FIELDS = [
-  { name: "value", label: "Identifier", type: "text", required: true },
-  { name: "scheme", label: "Scheme", type: "text", placeholder: "Issuing authority, ideally a resolvable URI" },
+  { name: "value", label: "field.identifier", type: "text", required: true },
+  { name: "scheme", label: "field.scheme", type: "text", placeholder: "ph.issuingAuthority" },
 ];
 
 import { DATES_FIELD } from "../fieldDefs";
 
 const territoryFields = (territoryNames) => [
-  { name: "territory", label: "Territory", type: "concept", required: true, options: territoryNames },
+  { name: "territory", label: "field.territory", type: "concept", required: true, options: territoryNames },
   DATES_FIELD,
 ];
 
@@ -39,6 +39,7 @@ const linkSummary = (l) => l.title || l.href;
 
 <script setup>
 import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { WIGOS_ID_PATTERN, buildWmdrRecord, parseWmdrRecord, duplicateWigosIds } from "../wmdr";
 import { validateWmdrRecord } from "../wmdrSchema";
 import { saveStation, getStation, getCodelist } from "../api";
@@ -59,6 +60,8 @@ import MapPreview from "./MapPreview.vue";
 // it (by key) for another station.
 const props = defineProps({ stationId: { type: [String, Number], default: null } });
 const emit = defineEmits(["saved", "cancel"]);
+
+const { t } = useI18n();
 
 const isEditing = props.stationId != null;
 const form = ref(initialState());
@@ -122,7 +125,7 @@ async function handleSubmit() {
   }
 }
 
-const submitLabel = computed(() => (isEditing ? "Save changes" : "Save WMDR record"));
+const submitLabel = computed(() => (isEditing ? t("form.saveChanges") : t("form.save")));
 </script>
 
 <template>
@@ -135,30 +138,30 @@ const submitLabel = computed(() => (isEditing ? "Save changes" : "Save WMDR reco
     prepend-icon="mdi-chevron-left"
     @click="emit('cancel')"
   >
-    Back to stations
+    {{ t("form.backToStations") }}
   </v-btn>
   <!-- Keeps the floating button from covering the top of the form before scrolling. -->
   <div class="back-button-spacer" />
 
-  <v-card v-if="isEditing && loadState.status === 'loading'" class="pa-6">Loading station...</v-card>
+  <v-card v-if="isEditing && loadState.status === 'loading'" class="pa-6">{{ t("form.loadingStation") }}</v-card>
   <v-alert v-else-if="isEditing && loadState.status === 'error'" type="error" variant="tonal">
-    Error: {{ loadState.error }}
+    {{ t("common.error", { message: loadState.error }) }}
   </v-alert>
 
   <v-row v-else>
     <v-col cols="12" md="7">
       <v-form @submit.prevent="handleSubmit">
         <v-card class="pa-6 mb-5">
-          <h3 class="section-title">Identification</h3>
+          <h3 class="section-title">{{ t("form.sectionIdentification") }}</h3>
           <div class="wigos-id-box">
-            <div class="group-label">WIGOS station identifier<span class="required-mark">*</span></div>
+            <div class="group-label">{{ t("form.wigosId") }}<span class="required-mark">*</span></div>
             <WigosIdInput v-model="form.id" :issuer-countries="issuerCountries" :disabled="isEditing" />
             <WigosIdFeedback :id="form.id" :status="idStatusOf(form.id)" :duplicate="duplicateIds.has(form.id)" />
 
             <div class="mt-4">
               <WigosIdListField
                 v-model="form.additionalIds"
-                label="Additional WIGOS identifiers"
+                label="field.additionalWigosIds"
                 :issuer-countries="issuerCountries"
                 :status-of="idStatusOf"
                 :duplicates="duplicateIds"
@@ -168,38 +171,38 @@ const submitLabel = computed(() => (isEditing ? "Save changes" : "Save WMDR reco
 
           <v-row density="compact" class="mb-2">
             <v-col cols="12" sm="4">
-              <v-text-field v-model="form.latitude" label="Latitude *" type="number" step="any" />
+              <v-text-field v-model="form.latitude" :label="t('form.latitudeRequired')" type="number" step="any" />
             </v-col>
             <v-col cols="12" sm="4">
-              <v-text-field v-model="form.longitude" label="Longitude *" type="number" step="any" />
+              <v-text-field v-model="form.longitude" :label="t('form.longitudeRequired')" type="number" step="any" />
             </v-col>
             <v-col cols="12" sm="4">
               <v-text-field
                 v-model="form.height"
-                label="Height (m)"
+                :label="t('field.height')"
                 type="number"
                 step="any"
-                placeholder="Above sea level"
+                :placeholder="t('ph.aboveSeaLevel')"
               />
             </v-col>
           </v-row>
 
           <div class="nested-card">
-            <div class="nested-card-header"><span>Time</span></div>
+            <div class="nested-card-header"><span>{{ t("form.time") }}</span></div>
             <ObjectArrayItemRow v-model:item="form.time" :fields="STATION_TIME_FIELDS" :path="['time']" />
           </div>
         </v-card>
 
         <v-card class="pa-6 mb-5">
-          <h3 class="section-title">Properties</h3>
-          <v-text-field v-model="form.title" class="mb-3" label="Title *" />
-          <v-textarea v-model="form.description" class="mb-4" label="Description" rows="3" auto-grow />
+          <h3 class="section-title">{{ t("form.sectionProperties") }}</h3>
+          <v-text-field v-model="form.title" class="mb-3" :label="t('form.titleRequired')" />
+          <v-textarea v-model="form.description" class="mb-4" :label="t('form.description')" rows="3" auto-grow />
 
-          <StringListField v-model="form.additionalTitles" label="Additional titles" />
+          <StringListField v-model="form.additionalTitles" label="field.additionalTitles" />
           <ObjectArrayField
             v-model="form.externalIds"
-            label="External IDs"
-            item-label="External ID"
+            label="field.externalIds"
+            item-label="field.externalId"
             :fields="EXTERNAL_ID_FIELDS"
             :item-summary="externalIdSummary"
             :path="[]"
@@ -207,10 +210,10 @@ const submitLabel = computed(() => (isEditing ? "Save changes" : "Save WMDR reco
 
           <v-row density="compact" class="mb-3">
             <v-col cols="12" sm="6">
-              <ConceptField v-model="form.facilityType" label="Facility type" :options="facilityTypes" />
+              <ConceptField v-model="form.facilityType" label="field.facilityType" :options="facilityTypes" />
             </v-col>
             <v-col cols="12" sm="6">
-              <ConceptField v-model="form.wmoRegion" label="WMO region" :options="wmoRegions" />
+              <ConceptField v-model="form.wmoRegion" label="field.wmoRegion" :options="wmoRegions" />
             </v-col>
           </v-row>
 
@@ -218,8 +221,8 @@ const submitLabel = computed(() => (isEditing ? "Save changes" : "Save WMDR reco
 
           <ObjectArrayField
             v-model="form.territories"
-            label="Territories"
-            item-label="Territory"
+            label="field.territories"
+            item-label="field.territory"
             :fields="territoryFields(territoryNames)"
             :item-summary="territorySummary"
             :path="[]"
@@ -228,30 +231,30 @@ const submitLabel = computed(() => (isEditing ? "Save changes" : "Save WMDR reco
         </v-card>
 
         <v-card class="pa-6 mb-5">
-          <h3 class="section-title">Links</h3>
+          <h3 class="section-title">{{ t("form.sectionLinks") }}</h3>
           <ObjectArrayField
             v-model="form.links"
-            label="Links"
-            item-label="Link"
+            label="field.links"
+            item-label="field.link"
             :fields="LINK_FIELDS"
             :item-summary="linkSummary"
             :path="[]"
           />
-          <p class="text-caption text-medium-emphasis">A link to this record on this node is added automatically.</p>
+          <p class="text-caption text-medium-emphasis">{{ t("form.linksHint") }}</p>
         </v-card>
 
         <div class="d-flex ga-3 align-center">
           <v-btn type="submit" color="primary" size="large" :disabled="!valid" :loading="submitState.status === 'loading'">
             {{ submitLabel }}
           </v-btn>
-          <v-btn variant="outlined" size="large" @click="emit('cancel')">Cancel</v-btn>
+          <v-btn variant="outlined" size="large" @click="emit('cancel')">{{ t("common.cancel") }}</v-btn>
         </div>
 
         <v-alert v-if="submitState.status === 'success'" class="mt-4" type="success" variant="tonal">
-          Saved successfully.
+          {{ t("form.saved") }}
         </v-alert>
         <v-alert v-if="submitState.status === 'error'" class="mt-4" type="error" variant="tonal">
-          Error: {{ submitState.error }}
+          {{ t("common.error", { message: submitState.error }) }}
         </v-alert>
       </v-form>
     </v-col>
@@ -259,16 +262,16 @@ const submitLabel = computed(() => (isEditing ? "Save changes" : "Save WMDR reco
     <v-col cols="12" md="5">
       <div class="sticky-col">
         <v-card class="pa-6 mb-5">
-          <h3 class="section-title">Map</h3>
+          <h3 class="section-title">{{ t("form.map") }}</h3>
           <MapPreview :latitude="form.latitude" :longitude="form.longitude" />
         </v-card>
         <v-card class="pa-6">
-          <h3 class="section-title">GeoJSON preview</h3>
+          <h3 class="section-title">{{ t("form.geojsonPreview") }}</h3>
           <v-alert v-if="schemaValid" type="success" variant="tonal" density="compact">
-            Valid against the WMDR2 schema.
+            {{ t("form.schemaValid") }}
           </v-alert>
           <v-alert v-else type="error" variant="tonal" density="compact">
-            Not yet valid against the WMDR2 schema:
+            {{ t("form.schemaInvalid") }}
             <ul class="schema-errors">
               <li v-for="error in schemaErrors" :key="error">{{ error }}</li>
             </ul>

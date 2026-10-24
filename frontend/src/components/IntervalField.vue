@@ -1,5 +1,7 @@
 <script setup>
 import { computed, reactive } from "vue";
+import { useI18n } from "vue-i18n";
+import { useFieldText } from "../i18n/keys";
 import { OPEN, dayFromPicker, describeInterval, intervalError, pickerFromDay, readBound } from "../interval";
 
 // A From – To interval. Bounds are typed freely and the interval is read back
@@ -13,12 +15,16 @@ const props = defineProps({
 const start = defineModel("start", { type: String, default: "" });
 const end = defineModel("end", { type: String, default: "" });
 
-const options = computed(() => ({ daysOnly: props.daysOnly }));
+const { t, locale } = useI18n();
+const text = useFieldText();
+
+// Passed to interval.js so its messages and date labels follow the UI language.
+const options = computed(() => ({ daysOnly: props.daysOnly, locale: locale.value, t }));
 const pickerOpen = reactive({ start: false, end: false });
 
 const bounds = computed(() => [
-  { key: "start", model: start, label: "From", openLabel: "Unknown" },
-  { key: "end", model: end, label: "To", openLabel: "Ongoing" },
+  { key: "start", model: start, label: t("interval.from"), openLabel: t("interval.unknown") },
+  { key: "end", model: end, label: t("interval.to"), openLabel: t("interval.ongoing") },
 ]);
 
 const rangeError = computed(() => intervalError(start.value, end.value, options.value));
@@ -40,7 +46,7 @@ function pick(bound, value) {
 
 <template>
   <div class="interval-field mb-3">
-    <div class="group-label">{{ label }}</div>
+    <div class="group-label">{{ text(label) }}</div>
     <div class="interval-bounds">
       <template v-for="(bound, i) in bounds" :key="bound.key">
         <span v-if="i > 0" class="interval-dash" aria-hidden="true">–</span>
@@ -49,7 +55,7 @@ function pick(bound, value) {
             :label="bound.label"
             :model-value="isOpen(bound) ? '' : bound.model.value"
             :disabled="isOpen(bound)"
-            :placeholder="isOpen(bound) ? '' : daysOnly ? 'YYYY-MM-DD' : 'e.g. 2020, 2020-01, 2020-01-31'"
+            :placeholder="isOpen(bound) ? '' : daysOnly ? t('interval.dayPlaceholder') : t('interval.boundPlaceholder')"
             :persistent-placeholder="!isOpen(bound)"
             :error-messages="errorsOf(bound)"
             @update:model-value="(value) => set(bound, value)"
@@ -64,7 +70,7 @@ function pick(bound, value) {
                     size="small"
                     density="comfortable"
                     :disabled="isOpen(bound)"
-                    :aria-label="`Pick the ${bound.label.toLowerCase()} date`"
+                    :aria-label="t('interval.pickDate', { bound: bound.label })"
                   />
                 </template>
                 <v-date-picker

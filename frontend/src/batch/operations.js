@@ -8,23 +8,23 @@ import * as wigosIds from "./wigosIds";
 export const OPERATIONS = [
   {
     id: "affiliations",
-    name: "Programme affiliations",
-    description: "Change programme/network affiliations, their reporting status and dates, or add an affiliation to observations.",
-    rowLabel: "One row per affiliation of an observation",
+    name: "op.programmeAffiliations",
+    description: "op.programmeAffiliationsDescription",
+    rowLabel: "op.programmeAffiliationsRows",
     module: affiliations,
   },
   {
     id: "configurations",
-    name: "Configurations",
-    description: "Change interval, operating status, source, observing method, instrument, location and vertical distance of configurations.",
-    rowLabel: "One row per configuration of an observation",
+    name: "op.configurations",
+    description: "op.configurationsDescription",
+    rowLabel: "op.configurationsRows",
     module: configurations,
   },
   {
     id: "wigosIds",
-    name: "WIGOS identifiers",
-    description: "Give stations a new primary WIGOS identifier and edit up to three additional identifiers.",
-    rowLabel: "One row per station",
+    name: "op.wigosIds",
+    description: "op.wigosIdsDescription",
+    rowLabel: "op.wigosIdsRows",
     module: wigosIds,
   },
 ];
