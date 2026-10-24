@@ -1,5 +1,6 @@
 <script setup>
 import { computed, provide, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import ObjectArrayField from "./ObjectArrayField.vue";
 import ObjectArrayItemRow from "./ObjectArrayItemRow.vue";
 import { DRILL_INTO } from "./drillInto";
@@ -17,6 +18,7 @@ defineProps({
 });
 const values = defineModel({ type: Array, required: true });
 
+const { t } = useI18n();
 const trail = ref([]);
 const current = computed(() => trail.value[trail.value.length - 1]);
 const currentItem = computed(() => (current.value && getAtPath(values.value, current.value.path)) || {});
@@ -52,7 +54,7 @@ const updateCurrent = (next) => {
       <v-card-title class="d-flex align-center">
         <span class="text-truncate">{{ current.label }}</span>
         <v-spacer />
-        <v-btn icon="mdi-close" variant="text" size="small" aria-label="Close" @click="close" />
+        <v-btn icon="mdi-close" variant="text" size="small" :aria-label="t('common.close')" @click="close" />
       </v-card-title>
       <v-divider />
       <v-card-text>
@@ -64,7 +66,7 @@ const updateCurrent = (next) => {
           prepend-icon="mdi-chevron-left"
           @click="back"
         >
-          Back to {{ trail[trail.length - 2].label }}
+          {{ t("drillIn.backTo", { label: trail[trail.length - 2].label }) }}
         </v-btn>
         <!-- Keyed by path, so moving between levels starts each one fresh. -->
         <ObjectArrayItemRow
@@ -77,7 +79,7 @@ const updateCurrent = (next) => {
       </v-card-text>
       <v-card-actions v-if="trail.length <= 1">
         <v-btn color="primary" variant="flat" :disabled="!isFieldsetComplete(currentItem, current.fields)" @click="close">
-          Done
+          {{ t("common.done") }}
         </v-btn>
       </v-card-actions>
     </v-card>

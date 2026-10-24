@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { listMyStations } from "../api";
 import StationsMap from "./StationsMap.vue";
 import SelectionBar from "./SelectionBar.vue";
@@ -9,11 +10,13 @@ import SelectionBar from "./SelectionBar.vue";
 const selected = defineModel("selected", { type: Set, required: true });
 const emit = defineEmits(["new", "edit", "batch"]);
 
-const HEADERS = [
-  { title: "WIGOS identifier", key: "wsi" },
-  { title: "Name", key: "name" },
+const { t } = useI18n();
+
+const headers = computed(() => [
+  { title: t("list.columnWsi"), key: "wsi" },
+  { title: t("list.columnName"), key: "name" },
   { title: "", key: "actions", sortable: false, align: "end" },
-];
+]);
 
 const stations = ref([]);
 const loadState = ref({ status: "loading" });
@@ -40,13 +43,13 @@ const rowProps = ({ item }) => ({ class: selectedIds.value.includes(item.station
 <template>
   <v-card class="pa-6">
     <div class="list-header">
-      <h3>My stations</h3>
-      <v-btn color="primary" prepend-icon="mdi-plus" @click="emit('new')">New station</v-btn>
+      <h3>{{ t("list.title") }}</h3>
+      <v-btn color="primary" prepend-icon="mdi-plus" @click="emit('new')">{{ t("list.newStation") }}</v-btn>
     </div>
 
-    <p v-if="loadState.status === 'loading'">Loading stations...</p>
-    <v-alert v-if="loadState.status === 'error'" type="error" variant="tonal">Error: {{ loadState.error }}</v-alert>
-    <p v-if="loadState.status === 'success' && stations.length === 0">No stations saved yet.</p>
+    <p v-if="loadState.status === 'loading'">{{ t("list.loading") }}</p>
+    <v-alert v-if="loadState.status === 'error'" type="error" variant="tonal">{{ t("common.error", { message: loadState.error }) }}</v-alert>
+    <p v-if="loadState.status === 'success' && stations.length === 0">{{ t("list.empty") }}</p>
 
     <template v-if="stations.length > 0">
       <StationsMap :stations="stations" />
@@ -59,7 +62,7 @@ const rowProps = ({ item }) => ({ class: selectedIds.value.includes(item.station
         @batch="emit('batch', selectedIds)"
       />
       <v-data-table
-        :headers="HEADERS"
+        :headers="headers"
         :items="stations"
         item-value="station_id"
         item-selectable="can_edit"
@@ -75,13 +78,13 @@ const rowProps = ({ item }) => ({ class: selectedIds.value.includes(item.station
           <v-checkbox-btn
             :model-value="isSelected(internalItem)"
             :disabled="!item.can_edit"
-            :aria-label="`Select ${item.name || item.wsi}`"
-            :title="item.can_edit ? undefined : `You don't have permission to edit this station`"
+            :aria-label="t('list.selectAria', { name: item.name || item.wsi })"
+            :title="item.can_edit ? undefined : t('list.noPermission')"
             @update:model-value="toggleSelect(internalItem)"
           />
         </template>
         <template #[`item.actions`]="{ item }">
-          <v-btn variant="tonal" color="secondary" size="small" @click="emit('edit', item.station_id)">Edit</v-btn>
+          <v-btn variant="tonal" color="secondary" size="small" @click="emit('edit', item.station_id)">{{ t("list.edit") }}</v-btn>
         </template>
       </v-data-table>
     </template>

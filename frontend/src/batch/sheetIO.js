@@ -1,4 +1,5 @@
 import { parseCsvRows, toCsv } from "../csv";
+import { canonical } from "../i18n/plain";
 import { isCellEditable, isEditable, isSpreadsheetRendering, normalizeCell } from "./common";
 
 // CSV / Excel export and import of a batch grid. Files have one column per
@@ -85,6 +86,9 @@ export function mergeSheet(table, sheet, rows, codelists) {
   columns.forEach((column) => {
     byName.set(column.key.toLowerCase(), column);
     byName.set(column.label.toLowerCase(), column);
+    // Files exported before the UI was translated — or by a station running in
+    // another language — name the columns in English.
+    byName.set(canonical(column.label).toLowerCase(), column);
   });
   const fileColumns = header.map((name) => byName.get(String(name).trim().toLowerCase()) || null);
   const report = {
@@ -216,7 +220,7 @@ export function pastedTable(text, sheet) {
   const header = new Set(lines[0].map((cell) => cell.trim().toLowerCase()));
   const named = (key) => {
     const column = columns.find((col) => col.key === key);
-    return header.has(key.toLowerCase()) || header.has(column.label.toLowerCase());
+    return header.has(key.toLowerCase()) || header.has(column.label.toLowerCase()) || header.has(canonical(column.label).toLowerCase());
   };
   if (importKeys.every(named)) return lines;
   if (lines.every((cells) => cells.length === columns.length)) return [columns.map((column) => column.key), ...lines];

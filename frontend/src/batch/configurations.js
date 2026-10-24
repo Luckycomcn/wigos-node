@@ -15,6 +15,7 @@ import {
   toNumber,
 } from "./common";
 import { codelistOptions } from "../codelists";
+import { translate } from "../i18n/plain";
 
 // Configurations (the WMDR2 equivalent of OSCAR's "change schedule"): one
 // row per existing configuration of one observation.
@@ -36,22 +37,22 @@ export const columns = [
   KEY_COLUMNS.wigosId,
   KEY_COLUMNS.stationName,
   KEY_COLUMNS.observedProperty,
-  { key: "configuration_id", label: "Configuration ID", kind: "key", width: 140 },
-  { key: "interval_start", label: "Interval start", kind: "date", width: 120 },
-  { key: "interval_end", label: "Interval end (empty if ongoing)", kind: "date", width: 130 },
-  { key: "operating_status", label: "Operating status", kind: "codelist", codelist: "operatingStatus", width: 170 },
-  { key: "source_of_observation", label: "Source of observation", kind: "codelist", codelist: "sourceOfObservation", width: 180 },
-  { key: "observing_method", label: "Observing method", kind: "codelist", codelist: "observingMethod", width: 200 },
-  { key: "instrument_id", label: "Instrument ID", kind: "text", width: 140 },
-  { key: "instrument_manufacturer", label: "Manufacturer", kind: "text", width: 140 },
-  { key: "instrument_model", label: "Model", kind: "text", width: 120 },
-  { key: "instrument_serial_number", label: "Serial number", kind: "text", width: 130 },
-  { key: "latitude", label: "Latitude", kind: "number", width: 100 },
-  { key: "longitude", label: "Longitude", kind: "number", width: 100 },
-  { key: "height", label: "Height (m)", kind: "number", width: 100 },
-  { key: "vertical_distances", label: "Vertical distances", kind: "numbers", width: 130 },
-  { key: "vertical_unit", label: "Vertical unit", kind: "codelist", codelist: "unit", width: 130 },
-  { key: "reference_surface", label: "Reference surface", kind: "codelist", codelist: "referenceSurface", width: 170 },
+  { key: "configuration_id", label: "col.configurationId", kind: "key", width: 140 },
+  { key: "interval_start", label: "col.intervalStart", kind: "date", width: 120 },
+  { key: "interval_end", label: "col.intervalEndEmptyOngoing", kind: "date", width: 130 },
+  { key: "operating_status", label: "col.operatingStatus", kind: "codelist", codelist: "operatingStatus", width: 170 },
+  { key: "source_of_observation", label: "col.sourceOfObservation", kind: "codelist", codelist: "sourceOfObservation", width: 180 },
+  { key: "observing_method", label: "col.observingMethod", kind: "codelist", codelist: "observingMethod", width: 200 },
+  { key: "instrument_id", label: "col.instrumentId", kind: "text", width: 140 },
+  { key: "instrument_manufacturer", label: "col.manufacturer", kind: "text", width: 140 },
+  { key: "instrument_model", label: "col.model", kind: "text", width: 120 },
+  { key: "instrument_serial_number", label: "col.serialNumber", kind: "text", width: 130 },
+  { key: "latitude", label: "col.latitude", kind: "number", width: 100 },
+  { key: "longitude", label: "col.longitude", kind: "number", width: 100 },
+  { key: "height", label: "col.height", kind: "number", width: 100 },
+  { key: "vertical_distances", label: "col.verticalDistances", kind: "numbers", width: 130 },
+  { key: "vertical_unit", label: "col.verticalUnit", kind: "codelist", codelist: "unit", width: 130 },
+  { key: "reference_surface", label: "col.referenceSurface", kind: "codelist", codelist: "referenceSurface", width: 170 },
 ];
 
 // A file row is matched to a grid row on these columns.

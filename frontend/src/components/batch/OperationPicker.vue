@@ -1,4 +1,5 @@
 <script setup>
+import { translate } from "../../i18n/plain";
 import { OPERATIONS } from "../../batch/operations";
 
 defineProps({ stationCount: { type: Number, required: true } });
@@ -8,8 +9,7 @@ const emit = defineEmits(["pick"]);
 <template>
   <div>
     <p class="batch-intro">
-      Choose what to change in the {{ stationCount }} selected {{ stationCount === 1 ? "station" : "stations" }}. The
-      next step shows their current values in a spreadsheet you can edit, or export to Excel and import back.
+      {{ translate(stationCount === 1 ? "batch.introOne" : "batch.introMany", { count: stationCount }) }}
     </p>
     <div class="operation-cards">
       <v-card
@@ -19,10 +19,10 @@ const emit = defineEmits(["pick"]);
         variant="outlined"
         @click="emit('pick', operation)"
       >
-        <v-card-title class="operation-card-name">{{ operation.name }}</v-card-title>
+        <v-card-title class="operation-card-name">{{ translate(operation.name) }}</v-card-title>
         <v-card-text>
-          <p class="operation-card-description">{{ operation.description }}</p>
-          <p class="operation-card-rows">{{ operation.rowLabel }}</p>
+          <p class="operation-card-description">{{ translate(operation.description) }}</p>
+          <p class="operation-card-rows">{{ translate(operation.rowLabel) }}</p>
         </v-card-text>
       </v-card>
     </div>
