@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from "vue";
+import { translate } from "../../i18n/plain";
 import { findCodelistOption } from "../../batch/common";
 import { CODELISTS, codelistOptions } from "../../codelists";
 
@@ -20,9 +21,9 @@ const optionText = (opt) => (opt.label === opt.code ? opt.label : `${opt.label} 
 </script>
 
 <template>
-  <option v-if="unknown" :value="value">{{ value }} (not in the codelist)</option>
+  <option v-if="unknown" :value="value">{{ value }} {{ translate("sheet.notInCodelist") }}</option>
   <template v-if="grouped">
-    <optgroup v-for="group in list" :key="group.label" :label="group.label">
+    <optgroup v-for="group in list" :key="group.label" :label="translate(group.label)">
       <option v-for="opt in group.options" :key="`${opt.id}|${opt.code}`" :value="opt.code">{{ optionText(opt) }}</option>
     </optgroup>
   </template>
