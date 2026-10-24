@@ -1,12 +1,32 @@
 // Interval bounds as wmdr2-bundled.json allows them: a year, month or day, a
 // UTC date and time, a UTC time of day, or ".." for an open bound. Affiliation
 // and territory dates allow only days (`daysOnly`).
+//
+// Everything here is plain JavaScript with no Vue dependency, so the wording
+// has an English default and is translated only when the caller passes a
+// translator (`options.t`) — see the `FALLBACK` table at the bottom.
 
 export const OPEN = "..";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const pad = (n) => String(n).padStart(2, "0");
+
+// Month names and day orders differ per language, so a non-English locale
+// formats its labels with Intl rather than the English table above.
+const isEnglish = (locale) => !locale || locale.startsWith("en");
+
+function monthLabel(year, month, locale) {
+  if (isEnglish(locale)) return `${MONTHS[month - 1]} ${year}`;
+  return new Intl.DateTimeFormat(locale, { year: "numeric", month: "long" }).format(new Date(Date.UTC(year, month - 1, 1)));
+}
+
+function dayLabel(year, month, day, locale) {
+  if (isEnglish(locale)) return `${day} ${MONTHS[month - 1]} ${year}`;
+  return new Intl.DateTimeFormat(locale, { year: "numeric", month: "long", day: "numeric" }).format(
+    new Date(Date.UTC(year, month - 1, day))
+  );
+}
 
 // A calendar date that exists (no 2020-02-30), as the UTC start of that day.
 function utcDay(year, month, day) {
@@ -28,56 +48,55 @@ const READERS = [
   {
     kind: "month",
     pattern: /^(\d{4})-(\d{2})$/,
-    read: ([y, m]) => (m >= 1 && m <= 12 ? { label: `${MONTHS[m - 1]} ${y}`, from: Date.UTC(y, m - 1, 1), to: Date.UTC(y, m, 1) } : null),
+    read: ([y, m], locale) =>
+      m >= 1 && m <= 12 ? { label: monthLabel(y, m, locale), from: Date.UTC(y, m - 1, 1), to: Date.UTC(y, m, 1) } : null,
   },
   {
     kind: "day",
     pattern: /^(\d{4})-(\d{2})-(\d{2})$/,
-    read: ([y, m, d]) => {
+    read: ([y, m, d], locale) => {
       const from = utcDay(y, m, d);
-      return from == null ? null : { label: `${d} ${MONTHS[m - 1]} ${y}`, from, to: from + DAY_MS };
+      return from == null ? null : { label: dayLabel(y, m, d, locale), from, to: from + DAY_MS };
     },
   },
   {
     kind: "datetime",
     pattern: /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?Z$/,
-    read: ([y, mo, d, h, mi, s]) => {
+    read: ([y, mo, d, h, mi, s], locale) => {
       const day = utcDay(y, mo, d);
       if (day == null || !validTime(h, mi, s)) return null;
       const from = day + ((h * 60 + mi) * 60 + s) * 1000;
-      return { label: `${d} ${MONTHS[mo - 1]} ${y}, ${pad(h)}:${pad(mi)}:${pad(s)} UTC`, from, to: from + 1000 };
+      return { label: `${dayLabel(y, mo, d, locale)}, ${pad(h)}:${pad(mi)}:${pad(s)} UTC`, from, to: from + 1000 };
     },
   },
   {
     kind: "time",
     pattern: /^T(\d{2})(?::(\d{2}))?(?::(\d{2}))?(?:\.\d+)?Z$/,
     scale: "time",
-    read: ([h, m = 0, s = 0]) => {
+    read: ([h, m = 0, s = 0], locale) => {
       if (!validTime(h, m, s)) return null;
       const from = ((h * 60 + m) * 60 + s) * 1000;
-      return { label: `${pad(h)}:${pad(m)}${s ? `:${pad(s)}` : ""} UTC, time of day`, from, to: from + 1000 };
+      const clock = `${pad(h)}:${pad(m)}${s ? `:${pad(s)}` : ""}`;
+      return { label: isEnglish(locale) ? `${clock} UTC, time of day` : `${clock} UTC`, from, to: from + 1000 };
     },
   },
 ];
 
-const FORMAT_HELP = "Use a year, month or day (2020, 2020-01, 2020-01-31), a UTC time (2020-01-31T06:00:00Z) or a time of day (T06:00Z)";
-const DAY_HELP = "Use a date as YYYY-MM-DD";
-
 // What a bound reads as: { kind: "empty" | "open" | "invalid" | <reader kind>, ... }.
-export function readBound(value, { daysOnly = false } = {}) {
+export function readBound(value, { daysOnly = false, locale, t } = {}) {
   const text = (value ?? "").toString().trim();
   if (!text) return { kind: "empty" };
   if (text === OPEN) return { kind: "open" };
   for (const reader of READERS) {
     const match = reader.pattern.exec(text);
     if (!match) continue;
-    if (daysOnly && reader.kind !== "day") return { kind: "invalid", message: DAY_HELP };
+    if (daysOnly && reader.kind !== "day") return { kind: "invalid", message: tr(t, "interval.dayHelp") };
     const parts = match.slice(1).map((part) => (part === undefined ? undefined : Number(part)));
-    const period = reader.read(parts);
-    if (!period) return { kind: "invalid", message: "Not a valid date or time" };
+    const period = reader.read(parts, locale);
+    if (!period) return { kind: "invalid", message: tr(t, "interval.invalid") };
     return { kind: reader.kind, scale: reader.scale || "date", ...period };
   }
-  return { kind: "invalid", message: daysOnly ? DAY_HELP : FORMAT_HELP };
+  return { kind: "invalid", message: tr(t, daysOnly ? "interval.dayHelp" : "interval.formatHelp") };
 }
 
 // Why the interval is wrong as a whole, or null. Bounds are compared only on
@@ -86,7 +105,7 @@ export function intervalError(start, end, options) {
   const from = readBound(start, options);
   const to = readBound(end, options);
   if (from.from == null || to.from == null || from.scale !== to.scale) return null;
-  return to.to <= from.from ? "The end is before the start" : null;
+  return to.to <= from.from ? tr(options?.t, "interval.endBeforeStart") : null;
 }
 
 const isOpen = (bound) => bound.kind === "open" || bound.kind === "empty";
@@ -98,11 +117,13 @@ export function describeInterval(start, end, options) {
   const from = readBound(start, options);
   const to = readBound(end, options);
   const label = (bound, value) => bound.label || (value ?? "").toString().trim();
-  const endLabel = ["year", "month"].includes(to.kind) ? `end of ${to.label}` : label(to, end);
+  const endLabel = ["year", "month"].includes(to.kind)
+    ? tr(options?.t, "interval.endOf", { label: to.label })
+    : label(to, end);
   if (isOpen(from) && isOpen(to)) return "";
-  if (isOpen(from)) return `Until ${endLabel}`;
-  if (isOpen(to)) return `Since ${label(from, start)}, ongoing`;
-  return `${label(from, start)} – ${endLabel}`;
+  if (isOpen(from)) return tr(options?.t, "interval.until", { label: endLabel });
+  if (isOpen(to)) return tr(options?.t, "interval.since", { label: label(from, start) });
+  return tr(options?.t, "interval.range", { from: label(from, start), to: endLabel });
 }
 
 // The date picker's value as a day bound, and a day bound as the picker's value.
@@ -117,4 +138,21 @@ export function pickerFromDay(value) {
   if (bound.kind !== "day") return null;
   const [y, m, d] = value.trim().split("-").map(Number);
   return new Date(y, m - 1, d);
+}
+
+// English defaults, used when no translator is passed (tests, plain JS callers).
+const FALLBACK = {
+  "interval.formatHelp": () =>
+    "Use a year, month or day (2020, 2020-01, 2020-01-31), a UTC time (2020-01-31T06:00:00Z) or a time of day (T06:00Z)",
+  "interval.dayHelp": () => "Use a date as YYYY-MM-DD",
+  "interval.invalid": () => "Not a valid date or time",
+  "interval.endBeforeStart": () => "The end is before the start",
+  "interval.endOf": ({ label }) => `end of ${label}`,
+  "interval.until": ({ label }) => `Until ${label}`,
+  "interval.since": ({ label }) => `Since ${label}, ongoing`,
+  "interval.range": ({ from, to }) => `${from} – ${to}`,
+};
+
+function tr(t, key, params) {
+  return t ? t(key, params) : FALLBACK[key](params);
 }

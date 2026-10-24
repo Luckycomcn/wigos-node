@@ -1,10 +1,26 @@
 <script setup>
-import { ref } from "vue";
+import { ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import LoginPage from "./components/LoginPage.vue";
 import StationsList from "./components/StationsList.vue";
 import WmdrForm from "./components/WmdrForm.vue";
 import BatchWizard from "./components/batch/BatchWizard.vue";
+import LocaleSwitcher from "./components/LocaleSwitcher.vue";
 import { useAuth } from "./composables/useAuth";
+import { useLocale } from "./composables/useLocale";
+
+const { t } = useI18n();
+const { pending, active } = useLocale();
+
+// The tab title follows the language too; index.html carries the English one
+// for the moment before the app mounts.
+watch(
+  active,
+  () => {
+    document.title = t("app.title");
+  },
+  { immediate: true }
+);
 
 const { status, user, setUser, logout } = useAuth();
 
@@ -24,18 +40,25 @@ async function handleLogout() {
   <v-app>
     <v-app-bar class="app-bar" height="88" flat>
       <div class="app-bar-title">
-        <h1>WMDR Station Record Builder</h1>
-        <p>Fill in station metadata and generate a WIGOS-conformant GeoJSON record.</p>
+        <h1>{{ t("app.title") }}</h1>
+        <p>{{ t("app.subtitle") }}</p>
       </div>
-      <template v-if="status === 'authenticated'" #append>
-        <span class="mr-3">{{ user.email || user.username }}</span>
-        <v-btn variant="tonal" @click="handleLogout">Log out</v-btn>
+      <template #append>
+        <LocaleSwitcher />
+        <template v-if="status === 'authenticated'">
+          <span class="mr-3 ml-4">{{ user.email || user.username }}</span>
+          <v-btn variant="tonal" @click="handleLogout">{{ t("app.logout") }}</v-btn>
+        </template>
       </template>
     </v-app-bar>
 
     <v-main>
       <v-container :class="['app-main', { 'app-main-wide': view.mode === 'batch' }]">
-        <p v-if="status === 'loading'">Loading…</p>
+        <v-alert v-if="pending" class="mb-4" type="info" variant="tonal" density="compact" data-testid="locale-pending">
+          {{ t("locale.pendingNotice", { language: pending }) }}
+        </v-alert>
+
+        <p v-if="status === 'loading'">{{ t("app.loading") }}</p>
 
         <LoginPage v-else-if="status === 'anonymous'" @success="setUser" />
 

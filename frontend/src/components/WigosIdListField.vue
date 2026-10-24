@@ -1,4 +1,6 @@
 <script setup>
+import { useI18n } from "vue-i18n";
+import { useFieldText } from "../i18n/keys";
 import WigosIdInput from "./WigosIdInput.vue";
 import WigosIdFeedback from "./WigosIdFeedback.vue";
 
@@ -11,6 +13,9 @@ defineProps({
   duplicates: { type: Set, required: true },
 });
 const values = defineModel({ type: Array, required: true });
+
+const { t } = useI18n();
+const text = useFieldText();
 
 const update = (index, value) => {
   values.value = values.value.map((v, i) => (i === index ? value : v));
@@ -25,21 +30,21 @@ const remove = (index) => {
 
 <template>
   <div>
-    <div v-if="values.length > 0" class="group-label">{{ label }}</div>
+    <div v-if="values.length > 0" class="group-label">{{ text(label) }}</div>
     <div v-for="(value, i) in values" :key="i" class="mb-3">
       <div class="input-row">
         <WigosIdInput
           :model-value="value"
           :issuer-countries="issuerCountries"
-          :label-prefix="`${label} ${i + 1}: `"
+          :label-prefix="`${text(label)} ${i + 1}: `"
           @update:model-value="(next) => update(i, next)"
         />
-        <v-btn variant="outlined" @click="remove(i)">Remove</v-btn>
+        <v-btn variant="outlined" @click="remove(i)">{{ t("common.remove") }}</v-btn>
       </div>
       <WigosIdFeedback :id="value" :status="statusOf(value)" :duplicate="duplicates.has(value)" />
     </div>
     <v-btn variant="tonal" color="secondary" size="small" prepend-icon="mdi-plus" @click="add">
-      Add additional WIGOS identifier
+      {{ t("wigos.addAdditional") }}
     </v-btn>
   </div>
 </template>

@@ -1,4 +1,5 @@
 <script setup>
+import { useFieldText } from "../i18n/keys";
 import ConceptField from "./ConceptField.vue";
 import IntervalField from "./IntervalField.vue";
 import DurationField from "./DurationField.vue";
@@ -14,12 +15,13 @@ defineProps({
 });
 const item = defineModel("item", { type: Object, required: true });
 
+const text = useFieldText();
 const INPUT_TYPES = ["text", "date", "datetime-local"];
 
 const setField = (name, value) => {
   item.value = { ...item.value, [name]: value };
 };
-const fieldLabel = (field) => (field.required ? `${field.label} *` : field.label);
+const fieldLabel = (field) => (field.required ? `${text(field.label)} *` : text(field.label));
 </script>
 
 <template>
@@ -30,7 +32,7 @@ const fieldLabel = (field) => (field.required ? `${field.label} *` : field.label
       :label="fieldLabel(field)"
       :type="field.type"
       :model-value="item[field.name] || ''"
-      :placeholder="field.placeholder"
+      :placeholder="text(field.placeholder)"
       :persistent-placeholder="!!field.placeholder"
       @update:model-value="(value) => setField(field.name, value)"
     />
@@ -64,13 +66,13 @@ const fieldLabel = (field) => (field.required ? `${field.label} *` : field.label
       v-else-if="field.type === 'array-string'"
       :label="field.label"
       :model-value="item[field.name] || []"
-      :placeholder="field.placeholder"
+      :placeholder="text(field.placeholder)"
       :required="field.required"
       @update:model-value="(value) => setField(field.name, value)"
     />
     <div v-else-if="field.type === 'object'" class="nested-card">
       <div class="nested-card-header">
-        <span>{{ field.label }}</span>
+        <span>{{ text(field.label) }}</span>
       </div>
       <ObjectArrayItemRow
         :item="item[field.name] || {}"

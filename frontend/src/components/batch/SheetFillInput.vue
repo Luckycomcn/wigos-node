@@ -1,4 +1,5 @@
 <script setup>
+import { translate } from "../../i18n/plain";
 import { computed, ref } from "vue";
 import SheetCodelistOptions from "./SheetCodelistOptions.vue";
 
@@ -11,7 +12,7 @@ const props = defineProps({
 const emit = defineEmits(["fill"]);
 
 const text = ref("");
-const label = computed(() => `Fill ${props.column.label} in the selected rows`);
+const label = computed(() => translate("sheet.fillColumn", { column: translate(props.column.label) }));
 
 function pick(e) {
   const value = e.target.value;
@@ -28,19 +29,19 @@ function fill() {
 
 <template>
   <select v-if="column.kind === 'codelist'" class="sheet-fill" value="" :aria-label="label" @change="pick">
-    <option value="">Set for selected…</option>
-    <option value="__empty__">(empty)</option>
+    <option value="">{{ translate("sheet.setForSelected") }}</option>
+    <option value="__empty__">{{ translate("batch.emptyOption") }}</option>
     <SheetCodelistOptions :column="column" :codelists="codelists" />
   </select>
   <div v-else class="sheet-fill-text">
     <input
       v-model="text"
       class="sheet-fill"
-      placeholder="Set for selected…"
+      :placeholder="translate('sheet.setForSelected')"
       :aria-label="label"
       @keydown.enter.prevent="fill"
     />
-    <button type="button" class="sheet-fill-button" :title="label" @click="fill">Set</button>
+    <button type="button" class="sheet-fill-button" :title="label" @click="fill">{{ translate("sheet.set") }}</button>
   </div>
 </template>
 

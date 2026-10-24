@@ -1,4 +1,5 @@
 <script setup>
+import { translate } from "../../i18n/plain";
 import { computed, ref, shallowRef } from "vue";
 import { getStations, saveStationsBatch } from "../../api";
 import { useCodelists } from "../../composables/useCodelists";
@@ -12,9 +13,9 @@ import PreviewDialog from "./PreviewDialog.vue";
 import BatchResults from "./BatchResults.vue";
 
 const STEPS = [
-  { id: "operation", label: "Operation" },
-  { id: "edit", label: "Edit" },
-  { id: "results", label: "Results" },
+  { id: "operation", label: "step.operation" },
+  { id: "edit", label: "step.edit" },
+  { id: "results", label: "step.results" },
 ];
 
 const props = defineProps({ stationIds: { type: Array, required: true } });
@@ -64,12 +65,12 @@ const invalidCells = computed(() =>
 );
 const applyBlockedReason = computed(() =>
   !changedCells.value
-    ? "Edit at least one cell first"
+    ? translate("batch.editAtLeastOne")
     : invalidCells.value
-      ? "Fix the cells outlined in red first (hover a cell to see why)"
+      ? translate("batch.fixInvalidCells")
       : undefined
 );
-const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+const plural = (n, oneKey, manyKey) => translate(n === 1 ? oneKey : manyKey, { count: n });
 
 async function openPreview() {
   const updated = sheet.value.applyRows(entries.value, rows.value, codelists.value);
@@ -139,9 +140,9 @@ function addRows() {
 <template>
   <v-card class="pa-6">
     <div class="list-header">
-      <h3>Batch operations{{ operation && step !== "operation" ? `: ${operation.name}` : "" }}</h3>
+      <h3>{{ translate("selection.batch") }}{{ operation && step !== "operation" ? `: ${translate(operation.name)}` : "" }}</h3>
       <v-btn variant="text" color="secondary" prepend-icon="mdi-chevron-left" @click="emit('close')">
-        Back to stations
+        {{ translate("batch.backToStations") }}
       </v-btn>
     </div>
 
@@ -157,17 +158,16 @@ function addRows() {
     <OperationPicker v-if="step === 'operation'" :station-count="stationIds.length" @pick="(op) => start(op, stationIds)" />
 
     <template v-if="step === 'edit'">
-      <p v-if="load.status === 'loading'">Loading the selected stations…</p>
+      <p v-if="load.status === 'loading'">{{ translate("batch.loadingStations") }}</p>
       <v-alert v-if="load.status === 'error'" type="error" variant="tonal">
-        Couldn't load the stations: {{ load.error }}
+        {{ translate("batch.loadFailed", { message: load.error }) }}
         <template #append>
-          <v-btn variant="outlined" @click="start(operation, load.ids)">Retry</v-btn>
+          <v-btn variant="outlined" @click="start(operation, load.ids)">{{ translate("common.retry") }}</v-btn>
         </template>
       </v-alert>
       <template v-if="load.status === 'done'">
         <v-alert v-if="load.missing.length > 0" class="mb-3" type="warning" variant="tonal" density="compact">
-          {{ load.missing.length }} selected
-          {{ load.missing.length === 1 ? "station no longer exists and is" : "stations no longer exist and are" }} left out.
+          {{ translate(load.missing.length === 1 ? "batch.missingOne" : "batch.missingMany", { count: load.missing.length }) }}
         </v-alert>
         <SheetGrid
           :key="operation.id"
@@ -184,10 +184,10 @@ function addRows() {
               color="secondary"
               prepend-icon="mdi-plus"
               :disabled="!selectedRows.size"
-              title="Adds an empty affiliation under the observation of each selected row"
+              :title="translate('batch.addAffiliationHint')"
               @click="addRows"
             >
-              Add affiliation to selected observations
+              {{ translate("batch.addAffiliation") }}
             </v-btn>
           </template>
         </SheetGrid>
@@ -195,20 +195,19 @@ function addRows() {
           <span class="batch-count">
             {{
               changedCells
-                ? `${plural(changedCells, "cell", "cells")} changed in ${plural(changedStations, "station", "stations")}`
-                : "No changes yet"
+                ? translate("batch.changed", { cells: plural(changedCells, "unit.cell", "unit.cells"), stations: plural(changedStations, "unit.station", "unit.stations") })
+                : translate("batch.noChanges")
             }}
             <span v-if="invalidCells > 0" class="text-error">
-              · {{ invalidCells }} edited {{ invalidCells === 1 ? "cell is" : "cells are" }} invalid (outlined in red,
-              hover for the reason)
+              · {{ translate(invalidCells === 1 ? "batch.invalidOne" : "batch.invalidMany", { count: invalidCells }) }}
             </span>
           </span>
           <div class="d-flex ga-3">
-            <v-btn variant="outlined" @click="step = 'operation'">Change operation</v-btn>
-            <v-btn variant="text" @click="emit('close')">Cancel</v-btn>
+            <v-btn variant="outlined" @click="step = 'operation'">{{ translate("batch.changeOperation") }}</v-btn>
+            <v-btn variant="text" @click="emit('close')">{{ translate("common.cancel") }}</v-btn>
             <!-- The wrapper shows the reason: a disabled button gets no hover. -->
             <span :title="applyBlockedReason">
-              <v-btn color="primary" :disabled="!!applyBlockedReason" @click="openPreview">Apply</v-btn>
+              <v-btn color="primary" :disabled="!!applyBlockedReason" @click="openPreview">{{ translate("batch.apply") }}</v-btn>
             </span>
           </div>
         </div>
