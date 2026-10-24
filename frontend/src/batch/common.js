@@ -1,5 +1,6 @@
 import { WIGOS_ID_PATTERN } from "../wmdr";
 import { codelistOptions } from "../codelists";
+import { translate } from "../i18n/plain";
 import { toCsv } from "../csv";
 
 // Shared pieces of the batch operations. A grid row is
@@ -13,9 +14,9 @@ import { toCsv } from "../csv";
 // Kinds: key (read-only), text, number, numbers (";"-list of numbers), date
 // (interval bound), codelist, wsi, wsis (";"-list of WIGOS IDs).
 export const KEY_COLUMNS = {
-  wigosId: { key: "wigos_id", label: "WIGOS ID", kind: "key", width: 170 },
-  stationName: { key: "station_name", label: "Station", kind: "key", width: 180 },
-  observedProperty: { key: "observed_property", label: "Observed property", kind: "key", width: 200 },
+  wigosId: { key: "wigos_id", label: "col.wigosId", kind: "key", width: 170 },
+  stationName: { key: "station_name", label: "col.station", kind: "key", width: 180 },
+  observedProperty: { key: "observed_property", label: "col.observedProperty", kind: "key", width: 200 },
 };
 
 export const isEditable = (column) => column.kind !== "key";
@@ -212,24 +213,24 @@ const isNumber = (text) => text.trim() !== "" && !Number.isNaN(Number(text));
 // Returns the reason a cell is invalid, or null.
 export function cellError(column, text, codelists) {
   const value = (text ?? "").trim();
-  if (!value) return column.required ? "Required" : null;
+  if (!value) return column.required ? translate("batch.required") : null;
   switch (column.kind) {
     case "number":
-      return isNumber(value) ? null : "Must be a number";
+      return isNumber(value) ? null : translate("batch.mustBeNumber");
     case "numbers":
-      return splitList(value).every(isNumber) ? null : `Must be numbers separated by "${LIST_SEPARATOR}"`;
+      return splitList(value).every(isNumber) ? null : translate("batch.mustBeNumbers", { separator: LIST_SEPARATOR });
     case "date":
-      return DATE_PATTERNS.some((p) => p.test(value)) ? null : "Use YYYY-MM-DD, YYYY-MM, YYYY or a UTC timestamp";
+      return DATE_PATTERNS.some((p) => p.test(value)) ? null : translate("batch.dateFormat");
     case "wsi":
-      return WIGOS_ID_PATTERN.test(value) ? null : "Not a valid WIGOS identifier";
+      return WIGOS_ID_PATTERN.test(value) ? null : translate("batch.invalidWigosId");
     case "wsis": {
       const bad = splitList(value).filter((id) => !WIGOS_ID_PATTERN.test(id));
-      return bad.length ? `Not a valid WIGOS identifier: ${bad.join(", ")}` : null;
+      return bad.length ? translate("batch.invalidWigosIds", { ids: bad.join(", ") }) : null;
     }
     case "codelist": {
       const options = codelistOptions(column.codelist, codelists);
       // While a codelist is unavailable any notation is accepted.
-      return !options.length || findCodelistOption(options, value) ? null : "Not in the codelist";
+      return !options.length || findCodelistOption(options, value) ? null : translate("batch.notInCodelist");
     }
     default:
       return null;
@@ -237,7 +238,7 @@ export function cellError(column, text, codelists) {
 }
 
 const choiceError = (column, row, value) =>
-  !value.trim() ? "Required" : findChoices(column, row, value).length ? null : column.choiceError || "Not one of the choices";
+  !value.trim() ? translate("batch.required") : findChoices(column, row, value).length ? null : column.choiceError || translate("batch.notAChoice");
 
 // ---------------------------------------------------------------------------
 // Rows

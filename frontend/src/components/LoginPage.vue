@@ -1,7 +1,9 @@
 <script setup>
 import { ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { login } from "../auth";
 
+const { t } = useI18n();
 const emit = defineEmits(["success"]);
 
 const username = ref("");
@@ -25,25 +27,25 @@ async function handleSubmit() {
 <template>
   <v-card class="login-card pa-6" max-width="420">
     <v-form @submit.prevent="handleSubmit">
-      <h3>Sign in</h3>
+      <h3>{{ t("login.title") }}</h3>
       <v-alert v-if="error" type="error" variant="tonal" density="compact" class="mb-4">{{ error }}</v-alert>
 
       <v-text-field
         v-model="username"
-        label="Email or username"
+        :label="t('login.identifier')"
         autocomplete="username"
         autofocus
         class="mb-4"
       />
       <v-text-field
         v-model="password"
-        label="Password"
+        :label="t('login.password')"
         type="password"
         autocomplete="current-password"
         class="mb-4"
       />
 
-      <v-btn type="submit" color="primary" :loading="busy" :disabled="!username || !password">Sign in</v-btn>
+      <v-btn type="submit" color="primary" :loading="busy" :disabled="!username || !password">{{ t("login.submit") }}</v-btn>
     </v-form>
   </v-card>
 </template>

@@ -1,7 +1,10 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, shallowRef, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import L from "leaflet";
 import { MARKER_STYLE, createBaseMap } from "../leafletMap";
+
+const { t } = useI18n();
 
 const props = defineProps({
   latitude: { type: [String, Number], default: "" },
@@ -42,7 +45,7 @@ onBeforeUnmount(() => map?.remove());
 <template>
   <div>
     <div ref="container" class="map-preview" />
-    <p v-if="!position" class="map-hint">Enter latitude/longitude to preview the point.</p>
+    <p v-if="!position" class="map-hint">{{ t("map.enterCoordinates") }}</p>
   </div>
 </template>
 

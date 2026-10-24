@@ -2,49 +2,51 @@
 import { codelistProps } from "../codelists";
 import { TIME_FIELDS, GEOMETRY_FIELDS, DATES_FIELD } from "../fieldDefs";
 import { describeInterval } from "../interval";
+import { activeLocale, translate } from "../i18n/plain";
 
 // Field names/shapes follow definitions/Observations, Configurations and
 // Instrument in wmo-im/wmdr2 schemas/wmdr2-bundled.json.
+// Labels are i18n message keys (see i18n/keys.js).
 
 const INSTRUMENT_FIELDS = [
-  { name: "id", label: "Instrument ID", type: "text" },
-  { name: "manufacturer", label: "Manufacturer", type: "text" },
-  { name: "model", label: "Model", type: "text" },
+  { name: "id", label: "field.instrumentId", type: "text" },
+  { name: "manufacturer", label: "field.manufacturer", type: "text" },
+  { name: "model", label: "field.model", type: "text" },
 ];
 
 function observationFields(codelists) {
   const concept = (name, label, extra) => ({ name, label, type: "concept", ...codelistProps(name, codelists), ...extra });
 
   const verticalDistanceFields = [
-    { name: "distances", label: "Distances", type: "array-string", placeholder: "Signed distance from reference surface" },
-    concept("unit", "Unit"),
-    concept("referenceSurface", "Reference surface"),
+    { name: "distances", label: "field.distances", type: "array-string", placeholder: "ph.signedDistance" },
+    concept("unit", "field.unit"),
+    concept("referenceSurface", "field.referenceSurface"),
   ];
 
   // No id field: buildWmdrRecord assigns one to a configuration without it.
   const configurationFields = [
-    { name: "time", label: "Time", type: "object", fields: TIME_FIELDS },
-    concept("observingMethod", "Observing method"),
-    concept("operatingStatus", "Operating status"),
-    concept("sourceOfObservation", "Source of observation"),
-    { name: "geometry", label: "Location", type: "object", fields: GEOMETRY_FIELDS },
-    { name: "instrument", label: "Instrument", type: "object", fields: INSTRUMENT_FIELDS },
-    { name: "instrumentSerialNumber", label: "Instrument serial number", type: "text" },
-    { name: "verticalDistance", label: "Vertical distance", type: "object", fields: verticalDistanceFields },
+    { name: "time", label: "field.time", type: "object", fields: TIME_FIELDS },
+    concept("observingMethod", "field.observingMethod"),
+    concept("operatingStatus", "field.operatingStatus"),
+    concept("sourceOfObservation", "field.sourceOfObservation"),
+    { name: "geometry", label: "field.location", type: "object", fields: GEOMETRY_FIELDS },
+    { name: "instrument", label: "field.instrument", type: "object", fields: INSTRUMENT_FIELDS },
+    { name: "instrumentSerialNumber", label: "field.instrumentSerialNumber", type: "text" },
+    { name: "verticalDistance", label: "field.verticalDistance", type: "object", fields: verticalDistanceFields },
   ];
 
   const programAffiliationFields = [
-    concept("programAffiliation", "Programme/network", { required: true }),
-    concept("reportingStatus", "Reporting status"),
+    concept("programAffiliation", "field.programAffiliation", { required: true }),
+    concept("reportingStatus", "field.reportingStatus"),
     DATES_FIELD,
   ];
 
   return [
-    concept("observedProperty", "Observed property", { required: true }),
-    concept("observedGeometry", "Observed geometry"),
+    concept("observedProperty", "field.observedProperty", { required: true }),
+    concept("observedGeometry", "field.observedGeometry"),
     {
       name: "programAffiliations",
-      label: "Program affiliation",
+      label: "field.programAffiliations",
       type: "array-object",
       fields: programAffiliationFields,
       required: true,
@@ -52,7 +54,7 @@ function observationFields(codelists) {
     },
     {
       name: "configurations",
-      label: "Configuration",
+      label: "field.configurations",
       type: "array-object",
       fields: configurationFields,
       required: true,
@@ -65,15 +67,16 @@ const observationSummary = (o) => o.observedProperty?.title || o.observedPropert
 
 // e.g. "Vaisala HMP155 · Since 2020, ongoing · Operational". A configuration
 // with none of these (a stored one may hold only its id) says so, rather than
-// showing a blank card.
+// showing a blank card. The interval wording and the date labels follow the
+// UI language, because this runs during render.
 const configurationSummary = (c) =>
   [
     [c.instrument?.manufacturer, c.instrument?.model].filter(Boolean).join(" "),
-    describeInterval(c.time?.intervalStart, c.time?.intervalEnd),
+    describeInterval(c.time?.intervalStart, c.time?.intervalEnd, { t: translate, locale: activeLocale() }),
     c.operatingStatus?.title || c.operatingStatus?.id,
   ]
     .filter(Boolean)
-    .join(" · ") || "No details yet";
+    .join(" · ") || translate("observations.noDetails");
 </script>
 
 <script setup>
@@ -89,8 +92,8 @@ const fields = computed(() => observationFields(codelists.value));
 <template>
   <DrillInArrayField
     v-model="observations"
-    label="Observations"
-    item-label="Observation"
+    label="field.observations"
+    item-label="field.observation"
     :fields="fields"
     :item-summary="observationSummary"
     required
