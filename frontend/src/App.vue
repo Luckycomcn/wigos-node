@@ -13,11 +13,13 @@ const { t } = useI18n();
 const { pending, active } = useLocale();
 
 // The tab title follows the language too; index.html carries the English one
-// for the moment before the app mounts.
+// for the moment before the app mounts. `lang` matters beyond the title: screen
+// readers pick their pronunciation from it, and so do :lang() CSS rules.
 watch(
   active,
   () => {
     document.title = t("app.title");
+    document.documentElement.lang = active.value;
   },
   { immediate: true }
 );
