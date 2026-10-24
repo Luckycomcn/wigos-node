@@ -1,5 +1,5 @@
 <script setup>
-import { translate } from "../../i18n/plain";
+import { columnLabel, translate } from "../../i18n/plain";
 import { computed, ref } from "vue";
 import SheetCodelistOptions from "./SheetCodelistOptions.vue";
 
@@ -12,7 +12,7 @@ const props = defineProps({
 const emit = defineEmits(["fill"]);
 
 const text = ref("");
-const label = computed(() => translate("sheet.fillColumn", { column: translate(props.column.label) }));
+const label = computed(() => translate("sheet.fillColumn", { column: columnLabel(props.column) }));
 
 function pick(e) {
   const value = e.target.value;
