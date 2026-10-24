@@ -3,21 +3,23 @@ import { getCodelist } from "./api";
 // Codelists (cached by the backend, see populate_codelists) behind each
 // concept field: a scheme name for a single list, or labelled schemes for a
 // field whose concepts come from several lists, shown as option groups.
+// The labels are message keys (translated where the groups are rendered), so
+// the option-group headings follow the UI language.
 export const CODELISTS = {
   observedProperty: [
-    { scheme: "ObservedVariableAtmosphere", label: "Atmosphere" },
-    { scheme: "ObservedVariableOcean", label: "Ocean" },
-    { scheme: "ObservedVariableTerrestrial", label: "Terrestrial" },
-    { scheme: "ObservedVariableOuterSpace", label: "Outer space" },
-    { scheme: "ObservedVariableEarth", label: "Earth" },
+    { scheme: "ObservedVariableAtmosphere", label: "opt.atmosphere" },
+    { scheme: "ObservedVariableOcean", label: "opt.ocean" },
+    { scheme: "ObservedVariableTerrestrial", label: "opt.terrestrial" },
+    { scheme: "ObservedVariableOuterSpace", label: "opt.outerSpace" },
+    { scheme: "ObservedVariableEarth", label: "opt.earth" },
   ],
   observedGeometry: "Geometry",
   programAffiliation: "ProgramAffiliation",
   reportingStatus: "ReportingStatus",
   observingMethod: [
-    { scheme: "ObservingMethodAtmosphere", label: "Atmosphere" },
-    { scheme: "ObservingMethodOcean", label: "Ocean" },
-    { scheme: "ObservingMethodTerrestrial", label: "Terrestrial" },
+    { scheme: "ObservingMethodAtmosphere", label: "opt.atmosphere" },
+    { scheme: "ObservingMethodOcean", label: "opt.ocean" },
+    { scheme: "ObservingMethodTerrestrial", label: "opt.terrestrial" },
   ],
   operatingStatus: "InstrumentOperatingStatus",
   sourceOfObservation: "SourceOfObservation",
