@@ -1,5 +1,6 @@
 <script setup>
 import { translate } from "../../i18n/plain";
+import { backendMessage } from "../../i18n/backendMessages";
 import { computed } from "vue";
 
 // Lists the changes per station with the frontend schema check and the
@@ -11,6 +12,12 @@ const props = defineProps({
   dryRun: { type: Object, required: true },
 });
 const emit = defineEmits(["confirm", "back"]);
+
+// The dry run reports its rejections in English prose from the API (D9).
+const failureText = (stationId) => {
+  const message = props.dryRun.byStation?.[stationId]?.message;
+  return backendMessage(message) ?? message;
+};
 
 const show = (value) => (value === undefined ? "—" : JSON.stringify(value));
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
@@ -105,7 +112,7 @@ const failureSummary = computed(() =>
               v-if="dryRun.byStation?.[change.stationId] && dryRun.byStation[change.stationId].status !== 'ok'"
               class="text-error mt-2"
             >
-              {{ dryRun.byStation[change.stationId].message }}
+              {{ failureText(change.stationId) }}
               <ul v-if="dryRun.byStation[change.stationId].errors?.length > 0" class="error-list">
                 <li v-for="error in dryRun.byStation[change.stationId].errors" :key="error">{{ error }}</li>
               </ul>

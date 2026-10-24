@@ -31,6 +31,31 @@ export default {
     requestFailed: "接口请求失败：{status}",
     codelistFailed: "无法加载码表 {scheme}：{status}",
     loginFailed: "登录失败：{status}",
+    // 后端 `detail` 里会出现的文案，见 i18n/backendMessages.js。
+    backend: {
+      recordNotObject: "记录必须是一个 JSON 对象。",
+      invalidRecord: "记录不符合 WMDR2 schema。",
+      wsiInUse: "WIGOS 标识符「{wsi}」已被其他台站使用。",
+      wsiInUseAdditional: "WIGOS 标识符「{wsi}」已出现在其他台站的附加标识中。",
+      stationNotFound: "未找到台站 {station}。",
+      stationNotFoundByWsi: "未找到 WIGOS 标识符为 {wsi} 的台站。",
+      noPermissionForIssuer: "您无权为签发机构 {issuer} {action}台站。",
+      noPermissionToChange: "您无权修改该台站。",
+      action: { create: "创建", update: "更新" },
+      batchNoStationIds: "请至少提供一个数字型 station_id 参数。",
+      batchReadLimit: "一次最多只能读取 {limit} 个台站。",
+      batchUpdateLimit: "单个请求最多允许 {limit} 条更新。",
+      batchPayloadShape: "请求体应为 { \"dry_run\": bool, \"updates\": [...] }。",
+      batchNeedsStationId: "必须提供数字型 station_id。批量操作不会创建新台站。",
+      saveFailed: "台站保存失败：{reason}",
+      badCredentials: "用户名或密码不正确。",
+      notAuthenticated: "尚未登录。",
+      noWigosIds: "未提供 WIGOS 标识符。",
+      geojsonNotFeature: "请求体必须是一个 GeoJSON Feature。",
+      noCachedCodelist: "本地未缓存码表「{scheme}」。",
+      stationCreated: "台站 {station} 创建成功。",
+      stationUpdated: "台站 {station} 已更新。",
+    },
   },
   // WMDR2 JSON Schema 的校验提示（wmdrSchema.js），接在字段路径之后，
   // 例如「geometry.longitude 必须是数字」。
@@ -277,6 +302,8 @@ export default {
   },
   map: {
     enterCoordinates: "输入经纬度以预览位置。",
+    zoomIn: "放大",
+    zoomOut: "缩小",
   },
   observations: {
     noDetails: "暂无详细信息",
