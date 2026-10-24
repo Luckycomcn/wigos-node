@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, shallowRef, watch } from "vue";
 import L from "leaflet";
 import { MARKER_STYLE, createBaseMap } from "../leafletMap";
+import i18n from "../i18n";
 
 const props = defineProps({ stations: { type: Array, required: true } });
 
@@ -63,25 +64,28 @@ function destroyMap() {
   markers = null;
 }
 
+function buildMap() {
+  destroyMap();
+  const element = container.value;
+  if (!element) return;
+  map = createBaseMap(element);
+  markers = L.layerGroup().addTo(map);
+  drawMarkers(map.getZoom());
+  fitToMarkers();
+}
+
 // The container only exists while there's something to show.
-watch(
-  container,
-  (element) => {
-    destroyMap();
-    if (!element) return;
-    map = createBaseMap(element);
-    markers = L.layerGroup().addTo(map);
-    drawMarkers(map.getZoom());
-    fitToMarkers();
-  },
-  { flush: "post" }
-);
+watch(container, buildMap, { flush: "post" });
 
 watch(positioned, () => {
   if (!map) return;
   drawMarkers(map.getZoom());
   fitToMarkers();
 });
+
+// Leaflet reads its control strings once, when the control is built, so a
+// language change has to rebuild the map for the zoom buttons to follow.
+watch(i18n.global.locale, buildMap);
 
 onBeforeUnmount(destroyMap);
 </script>

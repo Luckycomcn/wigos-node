@@ -1,5 +1,6 @@
 <script setup>
 import { translate } from "../../i18n/plain";
+import { backendMessage } from "../../i18n/backendMessages";
 import { computed } from "vue";
 import { resultsToCsv } from "../../batch/common";
 import { csvBlob, downloadBlob } from "../../batch/sheetIO";
@@ -11,6 +12,10 @@ const emit = defineEmits(["retry", "retry-failed", "back"]);
 const failed = computed(() =>
   props.state.status === "done" ? props.state.response.results.filter((result) => result.status !== "ok") : []
 );
+
+// Per-station failures come back as English prose from the API (D9); route
+// them through the translation table like the rest of the error messages.
+const failureText = (result) => backendMessage(result.message) ?? result.message;
 
 const download = () => downloadBlob(csvBlob(resultsToCsv(props.state.response.results)), "batch-results.csv");
 </script>
@@ -50,7 +55,7 @@ const download = () => downloadBlob(csvBlob(resultsToCsv(props.state.response.re
             </v-chip>
             <template v-else>
               <v-chip size="small" variant="tonal" color="error" prepend-icon="mdi-close">{{ translate("batch.resultFailed") }}</v-chip>
-              {{ result.message }}
+              {{ failureText(result) }}
               <ul v-if="result.errors?.length > 0" class="error-list text-error">
                 <li v-for="error in result.errors" :key="error">{{ error }}</li>
               </ul>

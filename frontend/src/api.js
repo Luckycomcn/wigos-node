@@ -1,6 +1,7 @@
 import { parseCsv } from "./csv";
 import { csrfHeader } from "./auth";
 import { translate } from "./i18n/plain";
+import { backendMessage } from "./i18n/backendMessages";
 
 const API_URL = import.meta.env.VITE_API_URL || "";
 
@@ -30,7 +31,7 @@ export async function saveStation(stationId, record) {
   }));
   const data = await res.json();
   if (!res.ok) {
-    throw new Error(data.detail || translate("api.requestFailed", { status: res.status }));
+    throw new Error(backendMessage(data.detail) || translate("api.requestFailed", { status: res.status }));
   }
   return data;
 }
@@ -41,7 +42,7 @@ export async function getStation(stationId) {
   }));
   const data = await res.json();
   if (!res.ok) {
-    throw new Error(data.detail || translate("api.requestFailed", { status: res.status }));
+    throw new Error(backendMessage(data.detail) || translate("api.requestFailed", { status: res.status }));
   }
   return data;
 }
@@ -52,7 +53,7 @@ export async function getStations(stationIds) {
   const res = handle401(await fetch(`${API_URL}/api/wmdrv2/batch/?${params}`, { credentials: "include" }));
   const data = await res.json();
   if (!res.ok) {
-    throw new Error(data.detail || translate("api.requestFailed", { status: res.status }));
+    throw new Error(backendMessage(data.detail) || translate("api.requestFailed", { status: res.status }));
   }
   return data;
 }
@@ -68,7 +69,7 @@ export async function saveStationsBatch(updates, { dryRun = false } = {}) {
   }));
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(data.detail || data.error || translate("api.requestFailed", { status: res.status }));
+    throw new Error(backendMessage(data.detail || data.error) || translate("api.requestFailed", { status: res.status }));
   }
   return data;
 }
