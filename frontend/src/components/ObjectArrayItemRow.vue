@@ -43,6 +43,7 @@ const fieldLabel = (field) => (field.required ? `${text(field.label)} *` : text(
       :model-value="item[field.name]"
       :options="field.options"
       :groups="field.groups"
+      :scheme="field.scheme"
       :required="field.required"
       :placeholder="field.placeholder"
       @update:model-value="(value) => setField(field.name, value)"

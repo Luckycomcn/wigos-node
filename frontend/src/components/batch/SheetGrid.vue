@@ -3,7 +3,7 @@ import { columnLabel, translate } from "../../i18n/plain";
 import { computed, ref, watch } from "vue";
 import { cellState, codelistLabel, isCellChanged, isCellEditable, isEditable, normalizeCell } from "../../batch/common";
 import { exportSheet, mergeSheet, pastedTable, readSheet } from "../../batch/sheetIO";
-import { codelistOptions } from "../../codelists";
+import { codelistOptions, codelistScheme } from "../../codelists";
 import SheetCellEditor from "./SheetCellEditor.vue";
 import SheetFillInput from "./SheetFillInput.vue";
 
@@ -75,7 +75,9 @@ watch(
 );
 
 const displayValue = (column, value) =>
-  column.kind === "codelist" && value ? codelistLabel(codelistOptions(column.codelist, props.codelists), value) : value;
+  column.kind === "codelist" && value
+    ? codelistLabel(codelistOptions(column.codelist, props.codelists), value, codelistScheme(column.codelist))
+    : value;
 
 // updates: [{ rowId, key, value }]; values are normalized here. An added row
 // is re-synced with the operation (e.g. moved to the observation it names).
@@ -286,6 +288,23 @@ function onCellDblclick(ri, ci) {
   if (state.editable) editing.value = { value: state.value };
 }
 
+// The one-line summary of an import: "2 rows matched, 4 cells changed" and,
+// when rows were added, ", 1 row added". Each part is its own pluralised
+// message; they are joined with the separator the language uses for a list
+// (English ", ", Chinese "，"), rather than with a comma hard-coded into the
+// template, which read as "2 rows matched,  4" and would be wrong in Chinese.
+const reportLine = computed(() => {
+  const report = importState.value?.report;
+  if (!report) return "";
+  const plural = (one, many, count) => translate(count === 1 ? one : many, { count });
+  const parts = [
+    plural("sheet.reportMatchedOne", "sheet.reportMatchedMany", report.matched),
+    plural("sheet.reportChangedOne", "sheet.reportChangedMany", report.changedCells),
+  ];
+  if (report.added > 0) parts.push(plural("sheet.reportAddedOne", "sheet.reportAddedMany", report.added));
+  return `${parts.join(translate("sheet.reportSeparator"))}.`;
+});
+
 const importWarning = computed(() => {
   const report = importState.value?.report;
   return !!report && !report.error && (report.unmatched.length > 0 || report.unknownHeaders.length > 0);
@@ -340,23 +359,7 @@ const importWarning = computed(() => {
     >
       <template v-if="importState.report.error">{{ importState.file }}: {{ importState.report.error }}</template>
       <template v-else>
-        <strong>{{ importState.file }}</strong>:
-        {{
-          translate(importState.report.matched === 1 ? "sheet.reportMatchedOne" : "sheet.reportMatchedMany", {
-            count: importState.report.matched,
-          })
-        }},&nbsp;
-        {{
-          translate(importState.report.changedCells === 1 ? "sheet.reportChangedOne" : "sheet.reportChangedMany", {
-            count: importState.report.changedCells,
-          })
-        }}<template v-if="importState.report.added > 0"
-          >,&nbsp;{{
-            translate(importState.report.added === 1 ? "sheet.reportAddedOne" : "sheet.reportAddedMany", {
-              count: importState.report.added,
-            })
-          }}</template
-        >.
+        <strong>{{ importState.file }}</strong>: {{ reportLine }}
         <div v-if="importState.report.restored > 0">
           {{ translate(importState.report.restored === 1 ? "sheet.reportKeptOne" : "sheet.reportKeptMany", { count: importState.report.restored }) }}
         </div>

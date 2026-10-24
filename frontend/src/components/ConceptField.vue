@@ -27,13 +27,15 @@ function findOption(allOptions, concept) {
 }
 
 // Every whitespace-separated term has to appear in the label or notation.
-function matchesQuery(opt, query) {
-  const haystack = `${opt.label} ${opt.code}`.toLowerCase();
+// `haystack` may hold both the shown name and the English one, so a search
+// works in either language.
+function matchesQuery(haystack, query) {
+  const lower = haystack.toLowerCase();
   return query
     .toLowerCase()
     .split(/\s+/)
     .filter(Boolean)
-    .every((term) => haystack.includes(term));
+    .every((term) => lower.includes(term));
 }
 
 const DETAIL_FIELDS = [
@@ -52,6 +54,8 @@ const CURRENT = "__current__";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useFieldText } from "../i18n/keys";
+import { activeLocale } from "../i18n/plain";
+import { codelistText } from "../i18n/codelistNames";
 
 const props = defineProps({
   label: { type: String, required: true },
@@ -59,6 +63,10 @@ const props = defineProps({
   groups: Array,
   required: Boolean,
   placeholder: String,
+  // The codelist the options came from, so their names can be shown in the UI
+  // language. Only the display is translated; `opt.label` — the wording
+  // conceptFromOption stores in the record — stays the WMO English.
+  scheme: String,
 });
 const concept = defineModel({ type: Object, default: null });
 
@@ -73,7 +81,9 @@ const allOptions = computed(() => (props.groups ? props.groups.flatMap((group) =
 const selected = computed(() => findOption(allOptions.value, concept.value));
 const searchable = computed(() => allOptions.value.length > SEARCHABLE_MIN_OPTIONS);
 
-const toItem = (opt) => ({ title: opt.label, value: optionValue(opt), opt });
+// `scheme` on the props covers a field backed by one list; a grouped field
+// carries a scheme per group instead (observedProperty draws on five lists).
+const toItem = (opt, scheme) => ({ title: codelistText(scheme, opt, activeLocale()), value: optionValue(opt), opt, scheme });
 const items = computed(() => {
   const list = [];
   // Keep a value that isn't in the codelist (or while it's still loading) visible.
@@ -86,10 +96,10 @@ const items = computed(() => {
       if (!group.options.length) return;
       // The scheme groups arrive as message keys ("opt.atmosphere").
       list.push({ type: "subheader", title: text(group.label) });
-      list.push(...group.options.map(toItem));
+      list.push(...group.options.map((opt) => toItem(opt, group.scheme)));
     });
   } else {
-    list.push(...(props.options || []).map(toItem));
+    list.push(...(props.options || []).map((opt) => toItem(opt, props.scheme)));
   }
   return list;
 });
@@ -104,7 +114,14 @@ function choose(value) {
   if (opt) concept.value = conceptFromOption(opt);
 }
 
-const filter = (_value, query, item) => !item.raw.opt || matchesQuery(item.raw.opt, query);
+// Typing in either language finds the entry: the shown name first, then the
+// English label the record will store. The scheme rides on the item because a
+// grouped field reads its options from several lists.
+const filter = (_value, query, item) => {
+  const { opt, scheme } = item.raw;
+  if (!opt) return true;
+  return matchesQuery(`${codelistText(scheme, opt, activeLocale())} ${opt.label} ${opt.code}`, query);
+};
 
 // --- Free text (no codelist)
 

@@ -65,6 +65,12 @@ const amountError = computed(() => {
 const unitError = computed(() => (String(amount.value ?? "").trim() && !unit.value ? t("duration.chooseUnit") : null));
 const isCustom = computed(() => !!duration.value && !fromDuration(duration.value));
 
+// The unit's name in the UI language. Vuetify hands the #item slot the
+// wrapper ({ raw }) and the #selection slot the entry itself, so both shapes
+// have to be accepted; a selection mid-teardown can be undefined, and reading
+// through it used to throw and take the whole field down.
+const unitLabel = (item) => t(item?.raw?.title ?? item?.title ?? "");
+
 // Writes the duration once both parts are valid; clearing the number clears it.
 function update() {
   const text = String(amount.value ?? "").trim();
@@ -95,9 +101,9 @@ function update() {
         @update:model-value="(value) => ((unit = value), update())"
       >
         <template #item="{ item, props: itemProps }">
-          <v-list-item v-bind="itemProps" :title="t(item.raw.title)" />
+          <v-list-item v-bind="itemProps" :title="unitLabel(item)" />
         </template>
-        <template #selection="{ item }">{{ t(item.raw.title) }}</template>
+        <template #selection="{ item }">{{ unitLabel(item) }}</template>
       </v-select>
       <div class="duration-presets">
         <v-chip
