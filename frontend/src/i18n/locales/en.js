@@ -381,6 +381,8 @@ export default {
     was: "Was: {value}",
     notation: "Notation: {value}",
     // Import report: "<file>: 2 rows matched, 4 cells changed, 1 row added."
+    // reportSeparator joins those clauses in the language's list style.
+    reportSeparator: ", ",
     reportMatchedOne: "{count} row matched",
     reportMatchedMany: "{count} rows matched",
     reportChangedOne: "{count} cell changed",

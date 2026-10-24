@@ -374,6 +374,7 @@ export default {
     was: "原值：{value}",
     notation: "代码：{value}",
     // 导入结果报告：「<文件>：匹配 2 行，修改 4 个单元格，新增 1 行。」
+    reportSeparator: "，",
     reportMatchedOne: "匹配 {count} 行",
     reportMatchedMany: "匹配 {count} 行",
     reportChangedOne: "修改 {count} 个单元格",

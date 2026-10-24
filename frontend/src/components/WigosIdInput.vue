@@ -2,6 +2,8 @@
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { splitWigosId, joinWigosId } from "../wmdr";
+import { activeLocale } from "../i18n/plain";
+import { codelistText, countryCodes } from "../i18n/codelistNames";
 
 // A WIGOS station identifier entered as its four parts: a fixed scheme (0),
 // the issuer country from ISO3166, the issue number and the local identifier.
@@ -20,11 +22,25 @@ const setPart = (part, text) => {
 };
 
 const issuerItems = computed(() =>
-  props.issuerCountries.map((country) => ({
-    title: `${country.code} — ${country.label}`,
-    value: String(Number(country.code)),
-  }))
+  props.issuerCountries.map((country) => {
+    const name = codelistText("ISO3166", country, activeLocale());
+    return {
+      title: `${country.code} — ${name}`,
+      value: String(Number(country.code)),
+      // Typing works in either language, on the issuer number, or on the ISO
+      // alpha-3 ("CHN"), which the codelist itself does not carry.
+      search: `${countryCodes(country.code).join(" ")} ${country.label} ${name}`.toLowerCase(),
+    };
+  })
 );
+
+const filterCountry = (_value, query, item) =>
+  !item.raw.search ||
+  query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .every((term) => item.raw.search.includes(term));
 </script>
 
 <template>
@@ -41,6 +57,7 @@ const issuerItems = computed(() =>
       :label="t('wigos.issuer')"
       :placeholder="t('wigos.selectCountry')"
       :items="issuerItems"
+      :custom-filter="filterCountry"
       :model-value="parts.issuer || null"
       :disabled="disabled"
       :aria-label="t('wigos.issuerAria', { prefix: labelPrefix })"

@@ -28,7 +28,7 @@ const EXTERNAL_ID_FIELDS = [
 import { DATES_FIELD } from "../fieldDefs";
 
 const territoryFields = (territoryNames) => [
-  { name: "territory", label: "field.territory", type: "concept", required: true, options: territoryNames },
+  { name: "territory", label: "field.territory", type: "concept", required: true, options: territoryNames, scheme: "TerritoryName" },
   DATES_FIELD,
 ];
 
@@ -210,10 +210,10 @@ const submitLabel = computed(() => (isEditing ? t("form.saveChanges") : t("form.
 
           <v-row density="compact" class="mb-3">
             <v-col cols="12" sm="6">
-              <ConceptField v-model="form.facilityType" label="field.facilityType" :options="facilityTypes" />
+              <ConceptField v-model="form.facilityType" label="field.facilityType" :options="facilityTypes" scheme="FacilityType" />
             </v-col>
             <v-col cols="12" sm="6">
-              <ConceptField v-model="form.wmoRegion" label="field.wmoRegion" :options="wmoRegions" />
+              <ConceptField v-model="form.wmoRegion" label="field.wmoRegion" :options="wmoRegions" scheme="WMORegion" />
             </v-col>
           </v-row>
 
