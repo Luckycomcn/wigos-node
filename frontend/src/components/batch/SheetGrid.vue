@@ -340,21 +340,36 @@ const importWarning = computed(() => {
     >
       <template v-if="importState.report.error">{{ importState.file }}: {{ importState.report.error }}</template>
       <template v-else>
-        <strong>{{ importState.file }}</strong>: {{ importState.report.matched }} rows matched,
-        {{ importState.report.changedCells }} cells changed<template v-if="importState.report.added > 0"
-          >, {{ importState.report.added }} rows added</template
+        <strong>{{ importState.file }}</strong>:
+        {{
+          translate(importState.report.matched === 1 ? "sheet.reportMatchedOne" : "sheet.reportMatchedMany", {
+            count: importState.report.matched,
+          })
+        }},&nbsp;
+        {{
+          translate(importState.report.changedCells === 1 ? "sheet.reportChangedOne" : "sheet.reportChangedMany", {
+            count: importState.report.changedCells,
+          })
+        }}<template v-if="importState.report.added > 0"
+          >,&nbsp;{{
+            translate(importState.report.added === 1 ? "sheet.reportAddedOne" : "sheet.reportAddedMany", {
+              count: importState.report.added,
+            })
+          }}</template
         >.
         <div v-if="importState.report.restored > 0">
-          {{ importState.report.restored }}
-          {{ importState.report.restored === 1 ? "cell was" : "cells were" }} kept as they were: Excel had reformatted
-          them (e.g. 12-12 as 12-Dec, or a long number as 3.2E+11). Use Export Excel to edit in Excel without this.
+          {{ translate(importState.report.restored === 1 ? "sheet.reportKeptOne" : "sheet.reportKeptMany", { count: importState.report.restored }) }}
         </div>
         <div v-if="importState.report.unmatched.length > 0">
-          {{ importState.report.unmatched.length }} rows not matched to a station in this batch and ignored:
+          {{
+            translate(importState.report.unmatched.length === 1 ? "sheet.reportUnmatchedOne" : "sheet.reportUnmatchedMany", {
+              count: importState.report.unmatched.length,
+            })
+          }}
           {{ importState.report.unmatched.slice(0, 10).join(", ") }}{{ importState.report.unmatched.length > 10 ? "…" : "" }}
         </div>
         <div v-if="importState.report.unknownHeaders.length > 0">
-          Unknown columns ignored: {{ importState.report.unknownHeaders.join(", ") }}
+          {{ translate("sheet.reportUnknownHeaders") }} {{ importState.report.unknownHeaders.join(", ") }}
         </div>
       </template>
     </v-alert>
@@ -458,11 +473,12 @@ const importWarning = computed(() => {
       </table>
     </div>
     <div class="sheet-help">
-      Click a cell and type to edit; Enter or Tab confirms, Esc cancels. Paste a block copied from Excel to fill from the
-      selected cell; whole rows (all columns, or with the header) are matched to their rows like an import instead.
-      <v-icon icon="mdi-lock-outline" size="x-small" /> cells identify existing rows and can only be set on added rows.
-      Lists are separated by ";".
-      <template v-if="filter"> Showing {{ visibleRows.length }} of {{ rows.length }} rows.</template>
+      {{ translate("sheet.help") }}
+      <v-icon icon="mdi-lock-outline" size="x-small" /> {{ translate("sheet.helpLock") }}
+      {{ translate("sheet.helpLists") }}
+      <template v-if="filter">
+        {{ translate("sheet.helpShowing", { visible: visibleRows.length, total: rows.length }) }}
+      </template>
     </div>
   </div>
 </template>

@@ -73,11 +73,11 @@ const READERS = [
     kind: "time",
     pattern: /^T(\d{2})(?::(\d{2}))?(?::(\d{2}))?(?:\.\d+)?Z$/,
     scale: "time",
-    read: ([h, m = 0, s = 0], locale) => {
+    read: ([h, m = 0, s = 0], locale, t) => {
       if (!validTime(h, m, s)) return null;
       const from = ((h * 60 + m) * 60 + s) * 1000;
       const clock = `${pad(h)}:${pad(m)}${s ? `:${pad(s)}` : ""}`;
-      return { label: isEnglish(locale) ? `${clock} UTC, time of day` : `${clock} UTC`, from, to: from + 1000 };
+      return { label: tr(t, "interval.timeOfDay", { clock }), from, to: from + 1000 };
     },
   },
 ];
@@ -92,7 +92,7 @@ export function readBound(value, { daysOnly = false, locale, t } = {}) {
     if (!match) continue;
     if (daysOnly && reader.kind !== "day") return { kind: "invalid", message: tr(t, "interval.dayHelp") };
     const parts = match.slice(1).map((part) => (part === undefined ? undefined : Number(part)));
-    const period = reader.read(parts, locale);
+    const period = reader.read(parts, locale, t);
     if (!period) return { kind: "invalid", message: tr(t, "interval.invalid") };
     return { kind: reader.kind, scale: reader.scale || "date", ...period };
   }
@@ -151,6 +151,7 @@ const FALLBACK = {
   "interval.until": ({ label }) => `Until ${label}`,
   "interval.since": ({ label }) => `Since ${label}, ongoing`,
   "interval.range": ({ from, to }) => `${from} – ${to}`,
+  "interval.timeOfDay": ({ clock }) => `${clock} UTC, time of day`,
 };
 
 function tr(t, key, params) {

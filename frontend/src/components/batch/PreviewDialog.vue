@@ -26,11 +26,11 @@ const canConfirm = computed(
 );
 const failureSummary = computed(() =>
   [
-    schemaFailures.value && `${schemaFailures.value} failing the schema check`,
-    dryRunFailures.value && `${dryRunFailures.value} rejected by the server`,
+    schemaFailures.value && translate("preview.failingSchema", { count: schemaFailures.value }),
+    dryRunFailures.value && translate("preview.rejectedByServer", { count: dryRunFailures.value }),
   ]
     .filter(Boolean)
-    .join(", ")
+    .join(translate("common.listSeparator"))
 );
 </script>
 

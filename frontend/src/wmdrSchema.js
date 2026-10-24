@@ -1,5 +1,6 @@
 import Ajv2020 from "ajv/dist/2020";
 import addFormats from "ajv-formats";
+import { translate } from "./i18n/plain";
 // Copy of backend/api/schemas/wmdr2-bundled.json (wmo-im/wmdr2 schemas/wmdr2-bundled.json).
 // The frontend container only mounts ./frontend, so it can't import the backend copy.
 import schema from "./schemas/wmdr2-bundled.json";
@@ -40,12 +41,59 @@ function isNoise(error) {
   return false;
 }
 
+// JSON Schema type and format names that occur in wmdr2-bundled.json, mapped to
+// the message keys that name them in the UI language.
+const TYPE_NAMES = {
+  string: "schema.typeString",
+  number: "schema.typeNumber",
+  integer: "schema.typeInteger",
+  object: "schema.typeObject",
+  array: "schema.typeArray",
+  boolean: "schema.typeBoolean",
+  null: "schema.typeNull",
+};
+
+// Date and time, URI, email — the formats the bundled schema uses.
+const FORMAT_NAMES = {
+  date: "schema.formatDate",
+  "date-time": "schema.formatDateTime",
+  uri: "schema.formatUri",
+  email: "schema.formatEmail",
+};
+
+// Every keyword wmdr2-bundled.json actually uses is covered here; anything
+// else falls back to ajv's own English wording rather than being dropped,
+// since a validator error is better shown than swallowed.
 function formatMessage(error) {
-  if (error.keyword === "required") return "is required";
-  if (error.keyword === "pattern") return "has an invalid format";
-  if (error.keyword === "minItems") return `needs at least ${error.params.limit} item(s)`;
-  if (error.keyword === "contains") return "is missing a required value";
-  return error.message;
+  switch (error.keyword) {
+    case "required":
+      return translate("schema.required");
+    case "pattern":
+      return translate("schema.pattern");
+    case "minItems":
+      return translate("schema.minItems", { limit: error.params.limit });
+    case "maxItems":
+      return translate("schema.maxItems", { limit: error.params.limit });
+    case "contains":
+      return translate("schema.contains");
+    case "uniqueItems":
+      return translate("schema.uniqueItems");
+    case "format":
+      return translate("schema.format", { format: translate(FORMAT_NAMES[error.params.format] || "schema.formatOther") });
+    case "enum":
+      return translate("schema.enum", { values: (error.params.allowedValues || []).join(", ") });
+    case "const":
+      return translate("schema.const", { value: error.params.allowedValue });
+    case "additionalProperties":
+      return translate("schema.additionalProperties", { property: error.params.additionalProperty });
+    case "type": {
+      const types = Array.isArray(error.params.type) ? error.params.type : [error.params.type];
+      const names = types.map((type) => translate(TYPE_NAMES[type] || "schema.typeOther")).join(translate("schema.or"));
+      return translate("schema.type", { type: names });
+    }
+    default:
+      return error.message;
+  }
 }
 
 // Returns a list of human-readable errors, empty when the record is valid.

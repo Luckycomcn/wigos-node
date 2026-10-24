@@ -1,5 +1,6 @@
 // Session-cookie auth against the Django backend. In dev the Vite proxy keeps
 // everything on one origin, so the sessionid / csrftoken cookies are first-party.
+import { translate } from "./i18n/plain";
 
 const API_URL = import.meta.env.VITE_API_URL || "";
 
@@ -29,7 +30,7 @@ export async function login(username, password) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(data.detail || `Login failed: ${res.status}`);
+    throw new Error(data.detail || translate("api.loginFailed", { status: res.status }));
   }
   await initCsrf(); // Django's login() rotates the CSRF token; refresh ours
   return data;

@@ -84,7 +84,8 @@ const items = computed(() => {
   if (props.groups) {
     props.groups.forEach((group) => {
       if (!group.options.length) return;
-      list.push({ type: "subheader", title: group.label });
+      // The scheme groups arrive as message keys ("opt.atmosphere").
+      list.push({ type: "subheader", title: text(group.label) });
       list.push(...group.options.map(toItem));
     });
   } else {

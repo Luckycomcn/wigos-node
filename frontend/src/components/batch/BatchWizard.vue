@@ -150,7 +150,7 @@ function addRows() {
       <v-stepper-header>
         <template v-for="(s, i) in STEPS" :key="s.id">
           <v-divider v-if="i > 0" />
-          <v-stepper-item :value="i" :title="s.label" :complete="i < stepIndex" color="primary" />
+          <v-stepper-item :value="i" :title="translate(s.label)" :complete="i < stepIndex" color="primary" />
         </template>
       </v-stepper-header>
     </v-stepper>

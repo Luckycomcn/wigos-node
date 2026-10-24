@@ -1,6 +1,7 @@
 import { computed, toValue } from "vue";
 import { splitList } from "../batch/common";
 import { idsInRows, ownIdsInRows, rowNote } from "../batch/wigosIds";
+import { translate } from "../i18n/plain";
 import { duplicateWigosIds } from "../wmdr";
 import { useWigosIdAvailability } from "./useWigosIdAvailability";
 
@@ -25,11 +26,11 @@ export function useWigosIdStatus(active, rows) {
     if (column.kind !== "wsi" && column.kind !== "wsis") return null;
     const cellIds = column.kind === "wsi" ? [row.cells[column.key]].filter(Boolean) : splitList(row.cells[column.key]);
     const duplicate = cellIds.find((id) => duplicates.value.has(id));
-    if (duplicate) return { error: `${duplicate} is entered more than once in this batch` };
+    if (duplicate) return { error: translate("wigos.gridDuplicate", { id: duplicate }) };
     const taken = cellIds.find((id) => availability(id) === "taken");
-    if (taken) return { error: `${taken} is already registered to another station` };
-    if (cellIds.some((id) => availability(id) === "checking")) return { hint: "checking…" };
-    if (cellIds.some((id) => availability(id) === "error")) return { hint: "couldn't check availability" };
+    if (taken) return { error: translate("wigos.gridTaken", { id: taken }) };
+    if (cellIds.some((id) => availability(id) === "checking")) return { hint: translate("wigos.gridChecking") };
+    if (cellIds.some((id) => availability(id) === "error")) return { hint: translate("wigos.gridCheckFailed") };
     return null;
   };
 }
