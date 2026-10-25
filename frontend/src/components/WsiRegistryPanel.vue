@@ -1,5 +1,6 @@
 <script setup>
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import {
   createWsiAllocation,
   deleteWsiAllocation,
@@ -9,6 +10,8 @@ import {
   listWsiAllocations,
   updateWsiAllocation,
 } from "../api";
+
+const { t } = useI18n();
 
 const open = defineModel({ type: Boolean, default: false });
 const emit = defineEmits(["changed"]);
@@ -46,7 +49,8 @@ async function load() {
       auditRows.value = await listAuditLog({ limit: 100 });
       isStaff.value = true;
     } catch {
-      isStaff.value = false; // 非 staff 读审计表会 403
+      // 非 staff 读审计表会 403：面板降级为「只有授权区间」。
+      isStaff.value = false;
     }
   } catch (err) {
     notify("error", err.message);
@@ -76,21 +80,21 @@ async function save() {
     note: form.value.note || "",
   };
   if (!Number.isInteger(payload.issuer) || payload.issuer < 0) {
-    notify("error", "centre-id（issuer）必须是非负整数");
+    notify("error", t("registry.errorIssuer"));
     return;
   }
   if (!Number.isInteger(payload.numberFrom) || !Number.isInteger(payload.numberTo)) {
-    notify("error", "起止序号必须是整数");
+    notify("error", t("registry.errorNumber"));
     return;
   }
   busy.value = true;
   try {
     if (editingId.value == null) {
       await createWsiAllocation(payload);
-      notify("success", "已新增授权区间");
+      notify("success", t("registry.created"));
     } else {
       await updateWsiAllocation(editingId.value, payload);
-      notify("success", "已更新授权区间");
+      notify("success", t("registry.updated"));
     }
     dialog.value = false;
     await load();
@@ -103,11 +107,16 @@ async function save() {
 }
 
 async function remove(row) {
-  if (!window.confirm(`删除 centre-id ${row.issuer} 的 ${row.numberFrom}–${row.numberTo} 区间？`)) return;
+  const question = t("registry.confirmDelete", {
+    issuer: row.issuer,
+    from: row.numberFrom,
+    to: row.numberTo,
+  });
+  if (!window.confirm(question)) return;
   busy.value = true;
   try {
     await deleteWsiAllocation(row.id);
-    notify("success", "已删除");
+    notify("success", t("registry.deleted"));
     await load();
     emit("changed");
   } catch (err) {
@@ -127,7 +136,7 @@ async function download(format) {
     link.download = `wsi-allocations.${format}`;
     link.click();
     URL.revokeObjectURL(url);
-    notify("success", `已导出 wsi-allocations.${format}`);
+    notify("success", t("registry.exported", { format }));
   } catch (err) {
     notify("error", err.message);
   } finally {
@@ -137,7 +146,7 @@ async function download(format) {
 
 async function runImport() {
   if (!importText.value.trim()) {
-    notify("error", "请粘贴要导入的 JSON 或 CSV 内容");
+    notify("error", t("registry.pasteRequired"));
     return;
   }
   busy.value = true;
@@ -151,7 +160,7 @@ async function runImport() {
     const accepted = importResult.value.accepted ?? 0;
     const rejected = importResult.value.rejected ?? 0;
     notify(rejected ? "warning" : "success",
-      `导入${importDryRun.value ? "试运行" : ""}完成：接受 ${accepted} 条，拒绝 ${rejected} 条`);
+      t(importDryRun.value ? "registry.importDoneDry" : "registry.importDone", { accepted, rejected }));
     if (!importDryRun.value) {
       await load();
       emit("changed");
@@ -180,41 +189,43 @@ watch(open, (value) => {
     <v-card class="pa-4">
       <div class="d-flex align-center justify-space-between mb-3">
         <div>
-          <h3 class="text-h6">WSI 注册表与发布授权</h3>
-          <div class="text-caption text-medium-emphasis">
-            登记每个 centre-id 被授予的 WSI 序号区间；发布时逐条比对，超范围在本地拒绝并留痕。
-          </div>
+          <h3 class="text-h6">{{ t("registry.title") }}</h3>
+          <div class="text-caption text-medium-emphasis">{{ t("registry.intro") }}</div>
         </div>
-        <v-btn variant="text" @click="open = false">关闭</v-btn>
+        <v-btn variant="text" @click="open = false">{{ t("common.close") }}</v-btn>
       </div>
 
       <v-alert v-if="message" :type="message.type" variant="tonal" class="mb-3" closable
         @click:close="message = null">{{ message.text }}</v-alert>
 
       <v-tabs v-model="tab" density="compact">
-        <v-tab value="allocations">授权区间</v-tab>
-        <v-tab value="transfer">导入 / 导出</v-tab>
-        <v-tab v-if="isStaff" value="audit">操作审计</v-tab>
+        <v-tab value="allocations">{{ t("registry.tabAllocations") }}</v-tab>
+        <v-tab value="transfer">{{ t("registry.tabTransfer") }}</v-tab>
+        <v-tab v-if="isStaff" value="audit">{{ t("registry.tabAudit") }}</v-tab>
       </v-tabs>
 
       <v-window v-model="tab" class="mt-3">
         <!-- ---------------- 授权区间 ---------------- -->
         <v-window-item value="allocations">
           <div class="d-flex ga-2 mb-3">
-            <v-btn size="small" color="primary" variant="tonal" @click="startCreate">新增区间</v-btn>
-            <v-btn size="small" variant="tonal" :disabled="busy" @click="load">刷新</v-btn>
+            <v-btn size="small" color="primary" variant="tonal" @click="startCreate">{{ t("registry.newRange") }}</v-btn>
+            <v-btn size="small" variant="tonal" :disabled="busy" @click="load">{{ t("registry.refresh") }}</v-btn>
           </div>
 
-          <p v-if="busy && !displayRows.length">加载中…</p>
+          <p v-if="busy && !displayRows.length">{{ t("registry.loading") }}</p>
           <v-alert v-else-if="!displayRows.length" type="info" variant="tonal">
-            还没有登记任何授权区间。未登记的 centre-id 无法发布任何站点。
+            {{ t("registry.empty") }}
           </v-alert>
 
           <v-table v-else density="compact">
             <thead>
               <tr>
-                <th>centre-id</th><th>series</th><th>起始序号</th><th>结束序号</th>
-                <th>备注</th><th></th>
+                <th>{{ t("registry.colCentre") }}</th>
+                <th>{{ t("registry.colSeries") }}</th>
+                <th>{{ t("registry.colFrom") }}</th>
+                <th>{{ t("registry.colTo") }}</th>
+                <th>{{ t("registry.colNote") }}</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -225,8 +236,8 @@ watch(open, (value) => {
                 <td>{{ row.numberTo }}</td>
                 <td class="text-medium-emphasis">{{ row.note || "—" }}</td>
                 <td class="text-right">
-                  <v-btn size="small" variant="text" @click="startEdit(row)">编辑</v-btn>
-                  <v-btn size="small" variant="text" color="error" @click="remove(row)">删除</v-btn>
+                  <v-btn size="small" variant="text" @click="startEdit(row)">{{ t("registry.edit") }}</v-btn>
+                  <v-btn size="small" variant="text" color="error" @click="remove(row)">{{ t("registry.delete") }}</v-btn>
                 </td>
               </tr>
             </tbody>
@@ -236,28 +247,25 @@ watch(open, (value) => {
         <!-- ---------------- 导入 / 导出 ---------------- -->
         <v-window-item value="transfer">
           <div class="d-flex ga-2 mb-3">
-            <v-btn size="small" variant="tonal" @click="download('json')">导出 JSON</v-btn>
-            <v-btn size="small" variant="tonal" @click="download('csv')">导出 CSV</v-btn>
+            <v-btn size="small" variant="tonal" @click="download('json')">{{ t("registry.exportJson") }}</v-btn>
+            <v-btn size="small" variant="tonal" @click="download('csv')">{{ t("registry.exportCsv") }}</v-btn>
           </div>
-          <div class="text-caption text-medium-emphasis mb-2">
-            导出的文件可直接交给目录侧做同步校验；也可在此粘贴回来完成批量导入。
-          </div>
+          <div class="text-caption text-medium-emphasis mb-2">{{ t("registry.transferHint") }}</div>
 
           <v-radio-group v-model="importFormat" inline density="compact" class="mb-2">
             <v-radio label="JSON" value="json" />
             <v-radio label="CSV" value="csv" />
           </v-radio-group>
           <v-textarea v-model="importText" rows="8" variant="outlined" density="compact"
-            placeholder='JSON: [{"issuer":20000,"series":0,"numberFrom":0,"numberTo":999999,"note":"..."}]
-CSV: issuer,series,numberFrom,numberTo,note' />
+            :placeholder="t('registry.pastePlaceholder')" />
           <div class="d-flex align-center ga-3 mt-2">
-            <v-checkbox v-model="importDryRun" label="试运行（只校验不写入）" density="compact" hide-details />
-            <v-btn size="small" color="primary" variant="tonal" :disabled="busy" @click="runImport">导入</v-btn>
+            <v-checkbox v-model="importDryRun" :label="t('registry.dryRunOnly')" density="compact" hide-details />
+            <v-btn size="small" color="primary" variant="tonal" :disabled="busy" @click="runImport">{{ t("registry.importBtn") }}</v-btn>
           </div>
 
           <div v-if="importResult" class="mt-3">
             <v-alert :type="importResult.rejected ? 'warning' : 'success'" variant="tonal" class="mb-2">
-              接受 {{ importResult.accepted }} 条，拒绝 {{ importResult.rejected }} 条
+              {{ t("registry.acceptedRejected", { accepted: importResult.accepted, rejected: importResult.rejected }) }}
             </v-alert>
             <pre class="result-box">{{ JSON.stringify(importResult.results, null, 2) }}</pre>
           </div>
@@ -265,38 +273,44 @@ CSV: issuer,series,numberFrom,numberTo,note' />
 
         <!-- ---------------- 审计 ---------------- -->
         <v-window-item value="audit">
-          <div class="text-caption text-medium-emphasis mb-2">
-            发布、发布被拒、注册表变更都会留痕（NF-6）。仅节点管理员可见。
-          </div>
+          <div class="text-caption text-medium-emphasis mb-2">{{ t("registry.auditIntro") }}</div>
           <v-table v-if="auditRows.length" density="compact">
             <thead>
-              <tr><th>时间</th><th>操作</th><th>操作者</th><th>站点</th><th>详情</th></tr>
+              <tr>
+                <th>{{ t("registry.colTime") }}</th>
+                <th>{{ t("registry.colAction") }}</th>
+                <th>{{ t("registry.colActor") }}</th>
+                <th>{{ t("registry.colStation") }}</th>
+                <th>{{ t("registry.colDetail") }}</th>
+              </tr>
             </thead>
             <tbody>
               <tr v-for="row in auditRows" :key="row.id">
                 <td class="text-no-wrap">{{ new Date(row.created).toLocaleString() }}</td>
                 <td><code>{{ row.action }}</code></td>
-                <td>{{ row.actor || "匿名" }}</td>
+                <td>{{ row.actor || t("registry.anonymous") }}</td>
                 <td>{{ row.wsi || "—" }}</td>
                 <td class="text-medium-emphasis result-cell">{{ JSON.stringify(row.detail) }}</td>
               </tr>
             </tbody>
           </v-table>
-          <v-alert v-else type="info" variant="tonal">暂无审计记录。</v-alert>
+          <v-alert v-else type="info" variant="tonal">{{ t("registry.noAudit") }}</v-alert>
         </v-window-item>
       </v-window>
 
       <v-dialog v-model="dialog" max-width="520">
         <v-card class="pa-4">
-          <h4 class="text-subtitle-1 mb-3">{{ editingId == null ? "新增授权区间" : "编辑授权区间" }}</h4>
-          <v-text-field v-model="form.issuer" label="centre-id（issuer 段，如 20000）" density="compact" />
-          <v-text-field v-model="form.series" label="series（默认 0）" density="compact" type="number" />
-          <v-text-field v-model="form.numberFrom" label="起始序号" density="compact" type="number" />
-          <v-text-field v-model="form.numberTo" label="结束序号（含）" density="compact" type="number" />
-          <v-text-field v-model="form.note" label="备注（授权来源、日期等）" density="compact" />
+          <h4 class="text-subtitle-1 mb-3">
+            {{ editingId == null ? t("registry.newRangeTitle") : t("registry.editRangeTitle") }}
+          </h4>
+          <v-text-field v-model="form.issuer" :label="t('registry.labelIssuer')" density="compact" />
+          <v-text-field v-model="form.series" :label="t('registry.labelSeries')" density="compact" type="number" />
+          <v-text-field v-model="form.numberFrom" :label="t('registry.labelFrom')" density="compact" type="number" />
+          <v-text-field v-model="form.numberTo" :label="t('registry.labelTo')" density="compact" type="number" />
+          <v-text-field v-model="form.note" :label="t('registry.labelNote')" density="compact" />
           <div class="d-flex justify-end ga-2 mt-3">
-            <v-btn variant="text" @click="dialog = false">取消</v-btn>
-            <v-btn color="primary" variant="tonal" :disabled="busy" @click="save">保存</v-btn>
+            <v-btn variant="text" @click="dialog = false">{{ t("common.cancel") }}</v-btn>
+            <v-btn color="primary" variant="tonal" :disabled="busy" @click="save">{{ t("registry.save") }}</v-btn>
           </div>
         </v-card>
       </v-dialog>

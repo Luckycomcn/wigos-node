@@ -418,3 +418,52 @@ export async function validateRecords(records, { ets = false } = {}) {
     body: JSON.stringify({ records, ets }),
   })), "Validation failed");
 }
+
+// --------------------------------------------------------------------------- //
+// 用户管理（节点管理员）：账号增删、重置他人密码；任何登录者可改自己密码。
+// --------------------------------------------------------------------------- //
+export async function listUsers() {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/users/`, {
+    credentials: "include",
+  })), "Failed to load users");
+}
+
+export async function listUserGroups() {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/users/groups/`, {
+    credentials: "include",
+  })), "Failed to load groups");
+}
+
+export async function createUser({ username, email, password, isStaff = false, groups = [] }) {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/users/`, {
+    method: "POST", credentials: "include", headers: jsonHeaders(),
+    body: JSON.stringify({ username, email, password, is_staff: isStaff, groups }),
+  })), "Failed to create the account");
+}
+
+export async function updateUser(userId, patch) {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/users/${encodeURIComponent(userId)}/`, {
+    method: "PATCH", credentials: "include", headers: jsonHeaders(),
+    body: JSON.stringify(patch),
+  })), "Failed to update the account");
+}
+
+export async function deleteUser(userId) {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/users/${encodeURIComponent(userId)}/`, {
+    method: "DELETE", credentials: "include", headers: jsonHeaders(),
+  })), "Failed to delete the account");
+}
+
+export async function setUserPassword(userId, password) {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/users/${encodeURIComponent(userId)}/password`, {
+    method: "POST", credentials: "include", headers: jsonHeaders(),
+    body: JSON.stringify({ password }),
+  })), "Failed to set the password");
+}
+
+export async function changeOwnPassword(oldPassword, newPassword) {
+  return jsonOrThrow(handle401(await fetch(`${API_URL}/api/password/change`, {
+    method: "POST", credentials: "include", headers: jsonHeaders(),
+    body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+  })), "Failed to change the password");
+}

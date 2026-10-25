@@ -6,6 +6,7 @@ import StationsList from "./components/StationsList.vue";
 import WmdrForm from "./components/WmdrForm.vue";
 import BatchWizard from "./components/batch/BatchWizard.vue";
 import LocaleSwitcher from "./components/LocaleSwitcher.vue";
+import ChangePasswordDialog from "./components/ChangePasswordDialog.vue";
 import { useAuth } from "./composables/useAuth";
 import { useLocale } from "./composables/useLocale";
 
@@ -28,6 +29,7 @@ const { status, user, setUser, logout } = useAuth();
 
 // { mode: "list" | "new" | "edit" | "batch", stationId?, stationIds? }
 const view = ref({ mode: "list" });
+const passwordOpen = ref(false);
 // Station IDs ticked in the list; kept here so they survive the batch wizard.
 const selected = ref(new Set());
 
@@ -49,6 +51,7 @@ async function handleLogout() {
         <LocaleSwitcher />
         <template v-if="status === 'authenticated'">
           <span class="mr-3 ml-4">{{ user.email || user.username }}</span>
+          <v-btn variant="tonal" prepend-icon="mdi-key" @click="passwordOpen = true">{{ t("app.changePassword") }}</v-btn>
           <v-btn variant="tonal" @click="handleLogout">{{ t("app.logout") }}</v-btn>
         </template>
       </template>
@@ -68,6 +71,7 @@ async function handleLogout() {
           <StationsList
             v-if="view.mode === 'list'"
             v-model:selected="selected"
+            :is-staff="Boolean(user && user.is_staff)"
             @new="view = { mode: 'new' }"
             @edit="(stationId) => (view = { mode: 'edit', stationId })"
             @batch="(stationIds) => (view = { mode: 'batch', stationIds })"
@@ -89,6 +93,9 @@ async function handleLogout() {
         </template>
       </v-container>
     </v-main>
+
+    <!-- 任何登录用户都能改自己的密码，与管理员面板无关。 -->
+    <ChangePasswordDialog v-model="passwordOpen" />
   </v-app>
 </template>
 

@@ -1,6 +1,6 @@
 from django.urls import include, path
 
-from . import auth, checks, interop, mvp, registry, views
+from . import auth, checks, interop, mvp, registry, useradmin, views
 from .views import Wmdrv2BatchView, Wmdrv2ByWsiView, Wmdrv2View
 
 urlpatterns = [
@@ -58,6 +58,12 @@ urlpatterns = [
     path("wsi-allocations/export", registry.WsiAllocationExportView.as_view(), name="wsi-allocations-export"),
     path("wsi-allocations/<int:allocation_id>/", registry.WsiAllocationDetailView.as_view(), name="wsi-allocation-detail"),
     path("audit/", registry.AuditLogListView.as_view(), name="audit-log"),
+    # 用户管理：节点管理员增删账号 / 重置密码；任何登录者可改自己的密码
+    path("users/", useradmin.UserListCreateView.as_view(), name="users"),
+    path("users/groups/", useradmin.UserGroupOptionsView.as_view(), name="user-groups"),
+    path("users/<int:user_id>/", useradmin.UserDetailView.as_view(), name="user-detail"),
+    path("users/<int:user_id>/password", useradmin.UserPasswordView.as_view(), name="user-password"),
+    path("password/change", useradmin.SelfPasswordView.as_view(), name="password-change"),
     # JSON auth endpoints for the SPA (the DRF HTML login stays at auth/ below)
     path("csrf/", auth.csrf, name="auth-csrf"),
     path("login/", auth.login, name="auth-login"),
