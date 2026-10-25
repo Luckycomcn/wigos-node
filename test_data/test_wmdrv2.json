@@ -45,7 +45,7 @@
                 "programAffiliations": [
                     {
                         "programAffiliation": {
-                            "id": "GOS"
+                            "id": "GOSGeneral"
                         },
                         "reportingStatus": {
                             "id": "operational"

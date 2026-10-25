@@ -9,6 +9,8 @@ __pycache__/
 venv/
 backend/staticfiles/
 backend/db.sqlite3
+# WNM publish 端点写出的消息文件（webstorage 运行时产物）
+backend/webstorage/
 
 # node
 node_modules/
@@ -20,3 +22,6 @@ frontend/dist/
 
 # internal docs
 docs/
+
+# 本地 worktree 里指向 i18n 轨的 node_modules 软链（不是目录，上面的 node_modules/ 匹配不到）
+frontend/node_modules

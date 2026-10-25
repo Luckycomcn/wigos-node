@@ -8,11 +8,12 @@ import logging
 from functools import cache
 from pathlib import Path
 
+from django.conf import settings
 from django.db import IntegrityError
 from guardian.shortcuts import assign_perm, get_objects_for_user
 from jsonschema import Draft202012Validator
 
-from .models import Station, WIGOSNodeGroup
+from .models import Station, StationVersion, WIGOSNodeGroup
 
 logger = logging.getLogger(__name__)
 
@@ -49,12 +50,45 @@ def validation_errors(wmdrv2):
     return [f"{_error_path(error)}: {error.message}" for error in errors]
 
 
-def validate(wmdrv2):
+def validate(wmdrv2, strict=True):
+    """Check a record against the WMDR2 schema.
+
+    Returns the list of problems (empty when valid). `strict=True` (the default,
+    and the behaviour every caller relied on) raises StationError instead; set
+    `strict=False` for drafts, where saving half-finished work is the whole
+    point — the caller is expected to hand the problems back to the user.
+    """
     if not isinstance(wmdrv2, dict):
-        raise StationError("The record must be a JSON object.")
+        problem = "The record must be a JSON object."
+        if strict:
+            raise StationError(problem)
+        return [problem]
     errors = validation_errors(wmdrv2)
-    if errors:
+    if errors and strict:
         raise StationError("The record is not valid against the WMDR2 schema.", errors=errors)
+    return errors
+
+
+def resolve_status(requested=None):
+    """方案 5.6：新记录的初始状态。
+
+    迁移里写死默认值会锁死部署策略，所以默认值由 STATION_DEFAULT_STATUS 决定：
+    "submitted" 保持「建了就能发」的旧行为（演示、迁移存量数据），"draft" 则是
+    强制走完 草稿 → 提交 → 校验 → 发布 的生产形态。
+    """
+    if requested in (Station.DRAFT, Station.SUBMITTED):
+        return requested
+    if requested:
+        logger.warning("Ignoring unknown station status %r, falling back to the default", requested)
+    configured = str(getattr(settings, "STATION_DEFAULT_STATUS", Station.SUBMITTED)).lower()
+    if configured not in (Station.DRAFT, Station.SUBMITTED):
+        # 拼错的配置如果静默吞掉，运维会以为策略生效了，实际没有。
+        logger.warning(
+            "STATION_DEFAULT_STATUS=%r is not one of draft/submitted, using %r",
+            configured, Station.SUBMITTED,
+        )
+        return Station.SUBMITTED
+    return configured
 
 
 def issuer_of(wsi):
@@ -129,28 +163,50 @@ def _save(station):
         raise StationError(f"The station could not be saved: {e}") from e
 
 
-def create_station(user, wmdrv2):
-    validate(wmdrv2)
+def _snapshot(station, operation, user):
+    """F-8: keep an immutable copy of the record after every save."""
+    last = station.versions.order_by("-version").values_list("version", flat=True).first() or 0
+    StationVersion.objects.create(
+        station=station,
+        version=last + 1,
+        wmdrv2=station.wmdrv2,
+        operation=operation,
+        created_by=user if getattr(user, "is_authenticated", False) else None,
+    )
+
+
+def create_station(user, wmdrv2, status=None):
+    status = resolve_status(status)
+    # 草稿允许带着 schema 问题落库（这就是"草稿保存"的意义），但把问题挂回
+    # 实例上让调用方回给用户；提交状态的记录照旧严格校验。
+    problems = validate(wmdrv2, strict=status != Station.DRAFT)
     wsis = wsis_of(wmdrv2)
     check_issuers(user, wsis, "create")
-    station = Station(wmdrv2=wmdrv2, owner=user)
+    station = Station(wmdrv2=wmdrv2, owner=user, status=status)
     _save(station)
     # after save so the station has a pk to attach object permissions to
     assign_perm("change_station", user, station)
     assign_issuer_groups(station, wsis)
+    _snapshot(station, "create", user)
+    station.schema_problems = problems
     return station
 
 
-def update_station(user, station, wmdrv2):
+def update_station(user, station, wmdrv2, status=None):
     if not user.has_perm("change_station", station):
         raise StationError("You do not have permission to change this station.", status=403)
-    validate(wmdrv2)
+    # status 未给出时保持原状 —— 编辑一条已提交的记录不该把它退回草稿。
+    new_status = resolve_status(status) if status is not None else station.status
+    problems = validate(wmdrv2, strict=new_status != Station.DRAFT)
     old_wsis = station.get_wigos_identifiers()
     new_wsis = wsis_of(wmdrv2)
     # Old and new: the primary and additional IDs may both change.
     check_issuers(user, old_wsis + new_wsis, "update")
     station.wmdrv2 = wmdrv2  # save() updates the index fields
+    station.status = new_status
     _save(station)  # owner is unchanged on update
     added = [wsi for wsi in new_wsis if issuer_of(wsi) not in {issuer_of(old) for old in old_wsis}]
     assign_issuer_groups(station, added)
+    _snapshot(station, "update", user)
+    station.schema_problems = problems
     return station

@@ -10,6 +10,7 @@ from rest_framework.test import APITestCase
 
 from . import wnm
 from .models import Station, WIGOSNodeGroup, WIGOSNodeUser
+from .testing_utils import load_test_json
 
 
 class StationAPITestCase(APITestCase):
@@ -84,8 +85,7 @@ class StationAPITestCase(APITestCase):
         self.assertEqual(len(response.content), message['links'][0]['length'])
 
 
-with open('/test_data/test_wmdrv2.json') as f:
-    BASE_RECORD = json.load(f)
+BASE_RECORD = load_test_json('test_wmdrv2.json')
 
 # Issuer groups seeded by migration 0004 (nfps_Switzerland and nfps_Brazil).
 ISSUER_A = 756
