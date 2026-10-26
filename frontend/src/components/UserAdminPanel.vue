@@ -17,7 +17,8 @@ import {
 } from "../api";
 import { backendMessage } from "../i18n/backendMessages";
 
-const open = defineModel({ type: Boolean, default: false });
+// 这是一个独立页面，不再是对话框：进来就加载，不需要等 open 变 true。
+const emit = defineEmits(["close"]);
 const { t } = useI18n();
 
 const rows = ref([]);
@@ -158,24 +159,22 @@ async function submitPassword() {
   }
 }
 
-watch(open, (value) => {
-  if (value) load();
-});
+// 作为页面挂载即加载。
+load();
 </script>
 
 <template>
-  <v-dialog v-model="open" max-width="980">
-    <v-card class="pa-6">
-      <div class="d-flex align-center justify-space-between mb-2">
-        <div>
-          <h3 class="text-h6">{{ t("admin.title") }}</h3>
-          <p class="text-caption text-medium-emphasis mb-0">{{ t("admin.subtitle") }}</p>
-        </div>
-        <div class="d-flex ga-2">
-          <v-btn variant="tonal" prepend-icon="mdi-refresh" :disabled="busy" @click="load">{{ t("admin.refresh") }}</v-btn>
-          <v-btn color="primary" prepend-icon="mdi-account-plus" :disabled="busy" @click="startCreate">{{ t("admin.newUser") }}</v-btn>
-        </div>
+  <v-card class="pa-6">
+    <div class="d-flex align-center justify-space-between mb-2">
+      <div>
+        <h3 class="text-h6">{{ t("admin.title") }}</h3>
+        <p class="text-caption text-medium-emphasis mb-0">{{ t("admin.subtitle") }}</p>
       </div>
+      <div class="d-flex ga-2">
+        <v-btn variant="tonal" prepend-icon="mdi-refresh" :disabled="busy" @click="load">{{ t("admin.refresh") }}</v-btn>
+        <v-btn color="primary" prepend-icon="mdi-account-plus" :disabled="busy" @click="startCreate">{{ t("admin.newUser") }}</v-btn>
+      </div>
+    </div>
 
       <v-alert v-if="message" :type="message.type" variant="tonal" closable class="mb-3" @click:close="message = null">
         {{ message.text }}
@@ -278,7 +277,6 @@ watch(open, (value) => {
         </v-card>
       </v-dialog>
     </v-card>
-  </v-dialog>
 </template>
 
 <style scoped>

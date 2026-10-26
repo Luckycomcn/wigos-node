@@ -13,8 +13,8 @@ import {
 
 const { t } = useI18n();
 
-const open = defineModel({ type: Boolean, default: false });
-const emit = defineEmits(["changed"]);
+// 独立页面：挂载即加载，不再等 open。
+const emit = defineEmits(["changed", "close"]);
 
 const tab = ref("allocations");
 const busy = ref(false);
@@ -175,24 +175,20 @@ async function runImport() {
 // 后端列表接口带主键 id（PATCH/DELETE 要用）；导出接口不带，两者刻意不同。
 const displayRows = computed(() => rows.value);
 
-watch(open, (value) => {
-  if (value) {
-    tab.value = "allocations";
-    importResult.value = null;
-    load();
-  }
-});
+// 作为页面挂载即加载。
+tab.value = "allocations";
+importResult.value = null;
+load();
 </script>
 
 <template>
-  <v-dialog :model-value="open" max-width="900" @update:model-value="open = $event">
-    <v-card class="pa-4">
+  <v-card class="pa-4">
       <div class="d-flex align-center justify-space-between mb-3">
         <div>
           <h3 class="text-h6">{{ t("registry.title") }}</h3>
           <div class="text-caption text-medium-emphasis">{{ t("registry.intro") }}</div>
         </div>
-        <v-btn variant="text" @click="open = false">{{ t("common.close") }}</v-btn>
+        <v-btn variant="text" prepend-icon="mdi-arrow-left" @click="emit('close')">{{ t("nav.backToList") }}</v-btn>
       </div>
 
       <v-alert v-if="message" :type="message.type" variant="tonal" class="mb-3" closable
@@ -314,8 +310,7 @@ watch(open, (value) => {
           </div>
         </v-card>
       </v-dialog>
-    </v-card>
-  </v-dialog>
+  </v-card>
 </template>
 
 <style scoped>

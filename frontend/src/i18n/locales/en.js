@@ -1,6 +1,15 @@
 // English messages — the reference catalog. Every other locale mirrors these
 // keys; a missing key falls back to this file.
 export default {
+  nav: {
+    manage: "Manage",
+    changePassword: "Change password",
+    users: "User management",
+    wsiRegistry: "WSI registry",
+    stations: "My stations",
+    tools: "Import / export",
+    backToList: "Back to list",
+  },
   app: {
     title: "WMDR Station Record Builder",
     subtitle: "Fill in station metadata and generate a WIGOS-conformant GeoJSON record.",

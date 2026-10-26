@@ -1,5 +1,14 @@
 // 简体中文（zh-CN）。键与 en.js 一一对应，缺键时回退英文。
 export default {
+  nav: {
+    manage: "管理",
+    changePassword: "修改密码",
+    users: "用户管理",
+    wsiRegistry: "WSI 注册表",
+    stations: "我的台站",
+    tools: "导入导出",
+    backToList: "返回列表",
+  },
   app: {
     title: "WMDR 台站记录构建器",
     subtitle: "填写台站元数据，生成符合 WIGOS 规范的 GeoJSON 记录。",

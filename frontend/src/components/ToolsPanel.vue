@@ -11,12 +11,12 @@ import {
   listTemplates,
 } from "../api";
 
-const open = defineModel({ type: Boolean, default: false });
+// 独立页面：不再有 open 模型，也不再从列表页接收选中项。
 const props = defineProps({
   stationIds: { type: Array, default: () => [] },
   initialTab: { type: String, default: "import" },
 });
-const emit = defineEmits(["imported"]);
+const emit = defineEmits(["imported", "close"]);
 const { t } = useI18n();
 
 const tab = ref("import");
@@ -160,15 +160,6 @@ const gradeHeaders = computed(() => [
 
 const selectedCount = computed(() => props.stationIds.length);
 
-watch(open, (value) => {
-  if (!value) return;
-  message.value = null;
-  tab.value = props.initialTab || "import";
-  if (tab.value === "templates") loadTemplates();
-  if (tab.value === "groups") loadGroups();
-  if (tab.value === "grades") loadGrades();
-});
-
 watch(tab, (value) => {
   if (value === "templates") loadTemplates();
   if (value === "groups") loadGroups();
@@ -177,11 +168,13 @@ watch(tab, (value) => {
 </script>
 
 <template>
-  <v-dialog v-model="open" max-width="960" scrollable>
-    <v-card>
-      <v-card-title class="d-flex align-center justify-space-between">
-        <span>{{ t("tools.title") }}</span>
-        <v-btn icon="mdi-close" variant="text" @click="open = false" />
+  <v-card class="pa-4">
+      <v-card-title class="d-flex align-center justify-space-between px-0">
+        <div>
+          <h3 class="text-h6">{{ t("tools.title") }}</h3>
+          <div class="text-caption text-medium-emphasis">{{ t("tools.intro") }}</div>
+        </div>
+        <v-btn variant="text" prepend-icon="mdi-arrow-left" @click="emit('close')">{{ t("nav.backToList") }}</v-btn>
       </v-card-title>
       <v-tabs v-model="tab" density="compact">
         <v-tab value="import">{{ t("tools.tabImport") }}</v-tab>
@@ -191,7 +184,7 @@ watch(tab, (value) => {
       </v-tabs>
       <v-divider />
 
-      <v-card-text style="max-height: 60vh">
+      <v-card-text class="px-0">
         <v-alert v-if="message" :type="message.type" variant="tonal" closable class="mb-3" @click:close="message = null">
           {{ message.text }}
         </v-alert>
@@ -319,6 +312,5 @@ watch(tab, (value) => {
         <v-spacer />
         <v-btn variant="text" @click="open = false">{{ t("common.close") }}</v-btn>
       </v-card-actions>
-    </v-card>
-  </v-dialog>
+  </v-card>
 </template>

@@ -14,18 +14,11 @@ import {
 import StationsMap from "./StationsMap.vue";
 import SelectionBar from "./SelectionBar.vue";
 import HistoryDialog from "./HistoryDialog.vue";
-import ToolsPanel from "./ToolsPanel.vue";
-import WsiRegistryPanel from "./WsiRegistryPanel.vue";
-import UserAdminPanel from "./UserAdminPanel.vue";
 
 // `selected` (a Set of station IDs) is kept by the parent so it survives a
 // trip to the batch wizard and back.
 const selected = defineModel("selected", { type: Set, required: true });
 const emit = defineEmits(["new", "edit", "batch"]);
-
-// Whether the signed-in user administers the node; the backend refuses these
-// calls anyway, so this only decides whether the entry point is shown.
-const props = defineProps({ isStaff: { type: Boolean, default: false } });
 
 const { t } = useI18n();
 
@@ -44,10 +37,6 @@ const message = ref(null);
 const showArchived = ref(false);
 const historyOpen = ref(false);
 const historyStationId = ref(null);
-const toolsOpen = ref(false);
-const toolsTab = ref("import");
-const registryOpen = ref(false);
-const usersOpen = ref(false);
 
 // BUG-18：原来只有两列、没有搜索、一次拉全量（items-per-page="-1"）。
 // 台站上百条时运维只能靠浏览器 Ctrl+F。这里改成服务端搜索 + 服务端分页。
@@ -147,11 +136,6 @@ function onExport(format) {
 const onExportOne = (station, format) =>
   run(() => exportStation(station.station_id, format), (r) => t("list.msgExportedOne", { wsi: station.wsi, filename: r.filename }));
 
-function openTools(tabName) {
-  toolsTab.value = tabName;
-  toolsOpen.value = true;
-}
-
 load();
 
 const editableIds = computed(() => stations.value.filter((s) => s.can_edit && !s.archived).map((s) => s.station_id));
@@ -167,47 +151,53 @@ const rowProps = ({ item }) => ({ class: selectedIds.value.includes(item.station
   <v-card class="pa-6">
     <div class="list-header">
       <h3>{{ t("list.title") }}</h3>
-      <div class="d-flex align-center ga-3">
-        <v-text-field
-          v-model="search"
-          :label="t('list.searchPlaceholder')"
-          prepend-inner-icon="mdi-magnify"
-          density="compact"
-          hide-details
-          clearable
-          single-line
-          class="list-search"
-        />
-        <v-select
-          v-model="statusFilter"
-          :items="statusOptions"
-          density="compact"
-          hide-details
-          class="list-status-filter"
-        />
-        <v-switch
-          v-model="showArchived"
-          :label="t('list.showArchived')"
-          density="compact"
-          hide-details
-        />
-        <v-menu>
-          <template #activator="{ props: menuProps }">
-            <v-btn v-bind="menuProps" variant="tonal" prepend-icon="mdi-download" :disabled="busy || stations.length === 0">
-              {{ selectedIds.length ? t("list.exportSelected", { count: selectedIds.length }) : t("list.export") }}
-            </v-btn>
-          </template>
-          <v-list density="compact">
-            <v-list-item title="CSV" @click="onExport('csv')" />
-            <v-list-item title="JSON" @click="onExport('json')" />
-            <v-list-item title="XML" @click="onExport('xml')" />
-          </v-list>
-        </v-menu>
-        <v-btn variant="tonal" prepend-icon="mdi-upload" @click="openTools('import')">{{ t("list.import") }}</v-btn>
-        <v-btn variant="tonal" prepend-icon="mdi-tools" @click="openTools('templates')">{{ t("list.tools") }}</v-btn>
-        <v-btn variant="tonal" prepend-icon="mdi-shield-key" @click="registryOpen = true">{{ t("list.wsiRegistry") }}</v-btn>
-        <v-btn v-if="props.isStaff" variant="tonal" prepend-icon="mdi-account-cog" @click="usersOpen = true">{{ t("list.users") }}</v-btn>
-        <v-btn color="primary" prepend-icon="mdi-plus" @click="emit('new')">{{ t("list.newStation") }}</v-btn>
+      <div class="list-actions">
+        <!-- 筛选区：搜索、状态、"显示已归档"。
+             原先把 v-switch 直接塞进 flex 行里，Vuetify 的 switch 自带
+             40px 的 wiggle 空间和 label 基线，混在按钮中间会上下错位，
+             看起来像"多出来的一行"且不齐 —— 这里给筛选控件统一包一层，
+             把目标和按钮行分开。 -->
+        <div class="list-filters">
+          <v-text-field
+            v-model="search"
+            :label="t('list.searchPlaceholder')"
+            prepend-inner-icon="mdi-magnify"
+            density="compact"
+            hide-details
+            clearable
+            single-line
+            class="list-search"
+          />
+          <v-select
+            v-model="statusFilter"
+            :items="statusOptions"
+            density="compact"
+            hide-details
+            class="list-status-filter"
+          />
+          <v-checkbox
+            v-model="showArchived"
+            :label="t('list.showArchived')"
+            density="compact"
+            hide-details
+            class="list-archived-toggle"
+          />
+        </div>
+        <div class="list-buttons">
+          <v-menu>
+            <template #activator="{ props: menuProps }">
+              <v-btn v-bind="menuProps" variant="tonal" prepend-icon="mdi-download" :disabled="busy || stations.length === 0">
+                {{ selectedIds.length ? t("list.exportSelected", { count: selectedIds.length }) : t("list.export") }}
+              </v-btn>
+            </template>
+            <v-list density="compact">
+              <v-list-item title="CSV" @click="onExport('csv')" />
+              <v-list-item title="JSON" @click="onExport('json')" />
+              <v-list-item title="XML" @click="onExport('xml')" />
+            </v-list>
+          </v-menu>
+          <v-btn color="primary" prepend-icon="mdi-plus" @click="emit('new')">{{ t("list.newStation") }}</v-btn>
+        </div>
       </div>
     </div>
 
@@ -325,10 +315,6 @@ const rowProps = ({ item }) => ({ class: selectedIds.value.includes(item.station
     </template>
 
     <HistoryDialog v-model="historyOpen" :station-id="historyStationId" />
-    <ToolsPanel v-model="toolsOpen" :station-ids="selectedIds" :initial-tab="toolsTab" @imported="load" />
-    <!-- 方案 5.3：WSI 授权范围 + NF-6 审计。面板内部自行降级，非 staff 只看得到分配表。 -->
-    <WsiRegistryPanel v-model="registryOpen" />
-    <UserAdminPanel v-model="usersOpen" />
   </v-card>
 </template>
 
@@ -353,6 +339,24 @@ const rowProps = ({ item }) => ({ class: selectedIds.value.includes(item.station
 }
 
 /* 工具栏在窄屏上会挤成一团：搜索框给一个下限宽度，其余控件按内容收缩。 */
+.list-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+/* 筛选控件单列一行，按钮单列一行 —— 开关（checkbox/switch）的基线跟
+   input 不一样，混在一起必然错位。 */
+.list-filters,
+.list-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
 .list-search {
   min-width: 14rem;
   max-width: 22rem;
@@ -360,6 +364,24 @@ const rowProps = ({ item }) => ({ class: selectedIds.value.includes(item.station
 
 .list-status-filter {
   max-width: 11rem;
+}
+
+/* "显示已归档"：用 checkbox 而不是 switch —— switch 自带的 wiggle 轨道会
+   把整行撑高，且它的视觉重心在右侧，跟左边的搜索框对不齐。checkbox 的
+   label 与 input 同基线，高度与 compact 的 input 一致。 */
+.list-archived-toggle {
+  flex: none;
+  margin-top: 0;
+}
+
+/* Vuetify 的 compact checkbox 默认有 8px 下边距，会把这一行推高。 */
+.list-archived-toggle :deep(.v-input__control) {
+  min-height: 40px;
+  align-items: center;
+}
+
+.list-archived-toggle :deep(.v-selection-control) {
+  min-height: 40px;
 }
 
 .list-page-size {
