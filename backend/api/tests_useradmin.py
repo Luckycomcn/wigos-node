@@ -8,7 +8,7 @@
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase
 
-from .useradmin import account_payload, guard_self, password_errors
+from .useradmin import account_payload, guard_self, is_guardian_placeholder, password_errors
 
 User = get_user_model()
 
@@ -127,3 +127,22 @@ class GuardSelfTests(SimpleTestCase):
     def test_unrelated_action_is_allowed(self):
         me = FakeUser(1)
         self.assertIsNone(guard_self(me, me, "update"))
+
+
+class GuardianPlaceholderTests(SimpleTestCase):
+    """guardian 的匿名用户行不能被当成真实账号。
+
+    它用 USERNAME_FIELD 当键建记录，本项目 USERNAME_FIELD 是 email，所以那条
+    记录长成 username='' / email='AnonymousUser'。真机上的用户表里确实出现过
+    这样一行（0016 迁移负责清掉），这里守住别再让它出现在列表与详情接口里。
+    """
+
+    def test_the_row_guardian_actually_creates_is_recognised(self):
+        self.assertTrue(is_guardian_placeholder(FakeUser(None, username="", email="AnonymousUser")))
+
+    def test_a_real_account_is_not_flagged(self):
+        self.assertFalse(is_guardian_placeholder(FakeUser(7, username="obs1", email="obs1@example.org")))
+
+    def test_a_username_less_account_with_a_normal_email_is_not_flagged(self):
+        """只有 username 为空还不够 —— email 必须正好是那个哨兵值。"""
+        self.assertFalse(is_guardian_placeholder(FakeUser(8, username="", email="nobody@example.org")))

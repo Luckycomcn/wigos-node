@@ -85,20 +85,36 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-CORS_ALLOWED_ORIGINS = os.environ.get(
-    "CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
-).split(",")
-
 # Allow the SPA to send the session cookie on cross-origin API calls (used when
 # the frontend talks to :8000 directly instead of through the Vite dev proxy).
 CORS_ALLOW_CREDENTIALS = True
 
-# Origins Django trusts for unsafe (POST/PUT) requests. The Vite dev proxy keeps
-# the browser on :5173 while forwarding to Django, so that origin must be listed
-# or every login/write request is rejected with 403.
-CSRF_TRUSTED_ORIGINS = os.environ.get(
-    "CSRF_TRUSTED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
-).split(",")
+# Origins Django trusts for unsafe (POST/PUT/PATCH/DELETE) requests. The SPA runs
+# on its own port and proxies to Django, so the browser's Origin header carries
+# that port while Django only ever sees 127.0.0.1:800x. Without this list every
+# write is rejected with "Origin checking failed" — and because curl does not
+# send an Origin header at all, an API-only test suite never notices.
+#
+# The default used to hard-code :5173 (the demo track). That silently broke the
+# i18n (:5174) and feature (:5175) tracks: reads worked, writes 403'd. Derive
+# the origins from ALLOWED_HOSTS instead so a fresh port just works.
+_CSRF_DEFAULT = ",".join(
+    f"http://{host}:{port}"
+    for host in (h.strip() for h in ALLOWED_HOSTS)
+    if host and host != "*"
+    for port in (5173, 5174, 5175)
+)
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("CSRF_TRUSTED_ORIGINS", _CSRF_DEFAULT).split(",")
+    if origin.strip()
+]
+
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("CORS_ALLOWED_ORIGINS", _CSRF_DEFAULT).split(",")
+    if origin.strip()
+]
 
 # WIS2 Notification Messages (api/wnm.py): this node's WIS2 centre id, and the
 # public web storage the announced record files are served from.
@@ -143,3 +159,14 @@ AUTHENTICATION_BACKENDS = (
     'django.contrib.auth.backends.ModelBackend',  # this is default
     'guardian.backends.ObjectPermissionBackend',
 )
+
+# django-guardian 会为「匿名用户」准备一条真实用户记录，供 get_objects_for_user
+# 在未登录时也能跑通对象权限查询。它建这条记录用的键是 USERNAME_FIELD，而本项目的
+# USERNAME_FIELD 是 email —— 于是每次 migrate 都会往用户表里塞一行
+# username='' / email='AnonymousUser' 的空账号。用户管理面板上线后，这一行就成了一
+# 个能看见、改不了、也不该存在的"用户"。
+#
+# 本项目不需要这个机制：匿名用户在 stations.editable_station_ids() 里已经提前返回
+# 空集合，永远不会走到 guardian 的对象权限查询。设成 None 就关闭了 post_migrate
+# 里的自动创建，也关掉了 get_anonymous_user() 的惰性重建。
+ANONYMOUS_USER_NAME = None

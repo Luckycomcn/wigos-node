@@ -135,6 +135,21 @@ def guard_self(actor, target, action):
 # --------------------------------------------------------------------------- #
 # Serialisation
 # --------------------------------------------------------------------------- #
+def is_guardian_placeholder(user):
+    """True for the row django-guardian keeps for anonymous object permissions.
+
+    Guardian keys that row by ``USERNAME_FIELD``, which here is ``email``, so on
+    this project it looks like ``username='' / email='AnonymousUser'``. It is not
+    a real account: it cannot log in (unusable password) and it must never show
+    up in the administration list. Older databases may still carry one from
+    before ``ANONYMOUS_USER_NAME`` was disabled in settings.
+    """
+    from django.conf import settings as django_settings
+
+    name = getattr(django_settings, "ANONYMOUS_USER_NAME", None) or "AnonymousUser"
+    return not user.username and (user.email == name or user.email == "AnonymousUser")
+
+
 def user_row(user):
     """One user as the frontend wants it.
 
@@ -196,7 +211,13 @@ class UserListCreateView(APIView):
     def get(self, request):
         if not request.user.is_staff:
             return Response({"detail": "User administration is restricted to node administrators."}, status=403)
-        return Response([user_row(user) for user in User.objects.order_by("username")])
+        return Response(
+            [
+                user_row(user)
+                for user in User.objects.order_by("username")
+                if not is_guardian_placeholder(user)
+            ]
+        )
 
     def post(self, request):
         if not request.user.is_staff:
@@ -260,9 +281,14 @@ class UserDetailView(APIView):
 
     def _target(self, user_id):
         try:
-            return User.objects.get(pk=user_id), None
+            user = User.objects.get(pk=user_id)
         except (User.DoesNotExist, ValueError):
             return None, Response({"detail": "User not found."}, status=404)
+        # guardian's anonymous row is not an account: it is invisible in the list,
+        # so editing it by a guessed id has to look like a miss as well.
+        if is_guardian_placeholder(user):
+            return None, Response({"detail": "User not found."}, status=404)
+        return user, None
 
     def patch(self, request, user_id):
         if not request.user.is_staff:
@@ -336,6 +362,8 @@ class UserPasswordView(APIView):
         try:
             user = User.objects.get(pk=user_id)
         except (User.DoesNotExist, ValueError):
+            return Response({"detail": "User not found."}, status=404)
+        if is_guardian_placeholder(user):
             return Response({"detail": "User not found."}, status=404)
 
         password = (request.data or {}).get("password")
