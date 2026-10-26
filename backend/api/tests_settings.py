@@ -22,18 +22,29 @@ class TrustedOriginTests(SimpleTestCase):
             self.assertIn(f":{port}", joined, f"端口 {port} 不在 CSRF 信任列表里：{joined}")
 
     def test_origins_follow_allowed_hosts(self):
-        """默认来源应当由 ALLOWED_HOSTS 推导，而不是写死某个主机名。"""
+        """默认来源应当由 ALLOWED_HOSTS 推导，而不是写死某个主机名。
+
+        ``ALLOWED_HOSTS='*'`` 是合法配置（测试脚本就用它），但通配无法枚举，
+        此时设置模块会回落到 loopback —— 这里只断言「非通配主机名都被覆盖」。
+        """
         # Django 的测试运行器会在配置加载完之后往 ALLOWED_HOSTS 里追加
         # 'testserver'，而信任列表是在设置模块求值时生成的，自然不含它。
         hosts = [
             h.strip()
             for h in settings.ALLOWED_HOSTS
-            if h and h != "*" and h.strip() != "testserver"
+            if h and h.strip() not in {"*", "testserver"}
         ]
-        self.assertTrue(hosts, "ALLOWED_HOSTS 不应为空")
         joined = " ".join(settings.CSRF_TRUSTED_ORIGINS)
         for host in hosts:
             self.assertIn(host, joined, f"{host} 出现在 ALLOWED_HOSTS 但不在信任来源里")
+
+    def test_wildcard_allowed_hosts_still_yields_a_usable_list(self):
+        """ALLOWED_HOSTS='*' 时不能推导出空列表 —— 空列表等于所有写操作 403。"""
+        self.assertTrue(
+            settings.CSRF_TRUSTED_ORIGINS,
+            "信任来源为空，浏览器发起的写请求会全部被 CSRF 拦掉",
+        )
+        self.assertTrue(settings.CORS_ALLOWED_ORIGINS, "CORS 来源为空")
 
     def test_origins_are_absolute_http_urls(self):
         """Origin 必须是带 scheme 的绝对地址，否则 Django 匹配不上。"""

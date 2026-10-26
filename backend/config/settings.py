@@ -98,11 +98,18 @@ CORS_ALLOW_CREDENTIALS = True
 # The default used to hard-code :5173 (the demo track). That silently broke the
 # i18n (:5174) and feature (:5175) tracks: reads worked, writes 403'd. Derive
 # the origins from ALLOWED_HOSTS instead so a fresh port just works.
+#
+# ALLOWED_HOSTS='*' can't be enumerated (and the test runner appends
+# 'testserver'), so fall back to loopback rather than ending up with an empty
+# trust list — an empty list turns every browser write into a 403.
+_TRACK_PORTS = (5173, 5174, 5175)
+_HOST_NAMES = [
+    host.strip()
+    for host in ALLOWED_HOSTS
+    if host.strip() and host.strip() not in {"*", "testserver"}
+] or ["localhost", "127.0.0.1"]
 _CSRF_DEFAULT = ",".join(
-    f"http://{host}:{port}"
-    for host in (h.strip() for h in ALLOWED_HOSTS)
-    if host and host != "*"
-    for port in (5173, 5174, 5175)
+    f"http://{host}:{port}" for host in _HOST_NAMES for port in _TRACK_PORTS
 )
 CSRF_TRUSTED_ORIGINS = [
     origin.strip()
