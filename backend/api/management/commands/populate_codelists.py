@@ -5,7 +5,7 @@ from pathlib import Path
 
 import requests
 from django.conf import settings
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 
 # Codelist URLs referenced via $comment in wmdrRecordGeoJSON.yaml.
 # The registry returns SKOS concepts as CSV by default (no Accept header
@@ -137,21 +137,48 @@ class Command(BaseCommand):
     )
 
     def add_arguments(self, parser):
+        # 这里**不能**给 nargs="*" 配 choices。argparse 在 Python 3.11 及以前，
+        # 遇到 `nargs="*"` + `choices` 且实际传入空列表时，会拿空列表去比
+        # choices，直接 SystemExit 2：
+        #   error: argument scheme: invalid choice: [] (choose from ...)
+        # 也就是说 `manage.py populate_codelists`（无参）在 ≤3.11 上必崩。
+        # 作者靠 python:3.12-slim 镜像侥幸绕过，而 entrypoint.sh 正是无参调用。
+        # 3.12 修了这个行为，但部署环境不保证 3.12。
+        #
+        # 改成不带 choices，在 handle 里自己校验：这样无参永远合法，
+        # 拼错 scheme 也仍然能得到一条清楚的错误。
         parser.add_argument(
             "schemes",
             nargs="*",
-            choices=sorted(CODELISTS),
             metavar="scheme",
-            help="Only update these codelists (default: all).",
+            help=f"Only update these codelists (default: all). Choices: {', '.join(sorted(CODELISTS))}",
+        )
+        parser.add_argument(
+            "--if-missing",
+            action="store_true",
+            help="Skip any codelist whose CSV already exists. Use this in entrypoints: "
+                 "it makes an offline restart a no-op instead of a slow failure.",
         )
 
     def handle(self, *args, **options):
         codelists_dir = Path(settings.BASE_DIR) / "api" / "codelists"
         codelists_dir.mkdir(parents=True, exist_ok=True)
 
+        unknown = [s for s in options["schemes"] if s not in CODELISTS]
+        if unknown:
+            raise CommandError(
+                f"unknown codelist(s): {', '.join(unknown)}. "
+                f"Choose from: {', '.join(sorted(CODELISTS))}"
+            )
+
+        only_missing = options.get("if_missing", False)
+
         for scheme in options["schemes"] or CODELISTS:
             config = CODELISTS[scheme]
             dest = codelists_dir / f"{scheme}.csv"
+            if only_missing and dest.exists() and dest.stat().st_size > 0:
+                self.stdout.write(f"Skipping {scheme}: {dest.name} already cached.")
+                continue
             self.stdout.write(f"Updating {scheme} from {config['url']}...")
 
             url, member_codes = config["url"], config["member_codes"]

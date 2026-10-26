@@ -10,3 +10,27 @@ jsonschema[format-nongpl]==4.26.0
 # 方案 5.5 选项一：节点经本地代理向 WIS2 全局代理发布 WNM。
 # 未安装也不影响运行 —— api/publishers.py 会把该通道报为不可用。
 paho-mqtt==2.1.0
+
+# ---------------------------------------------------------------------------
+# 系统级（非 pip）依赖 —— 必须由操作系统提供，pip 装不了：
+#
+#   GDAL  >= 3.6    django.contrib.gis 的几何类型与 GeoJSON 序列化
+#   GEOS  >= 3.9    Point/Polygon 等几何运算（GEOSGeometry）
+#   libpq           psycopg2 的运行时库
+#   PostGIS 扩展    PostgreSQL 侧的 geometry 类型（迁移 0001 会 CREATE EXTENSION）
+#
+# 各平台的装法：
+#   Debian/Ubuntu  apt-get install libgdal-dev gdal-bin libgeos-dev libpq-dev \
+#                                  postgresql-client
+#   RHEL/CentOS    yum install gdal-devel geos-devel libpq-devel postgresql
+#   conda          conda install -c conda-forge gdal geos postgresql postgis
+#
+# Django 是按裸名 dlopen 这两个库的（cdll.LoadLibrary("libgdal.so")），
+# 装在非标准前缀时必须显式告诉它去哪找：
+#   export GDAL_LIBRARY_PATH=/path/to/libgdal.so
+#   export GEOS_LIBRARY_PATH=/path/to/libgeos_c.so
+#
+# 原版只在 backend/Dockerfile 里 apt-get 装了这些，requirements 一字未提，
+# 结果"只用 pip 装依赖"的非 Docker 部署一律在 import 阶段失败，
+# 且报错是 libgdal.so 找不到，指不到 requirements 缺了东西这一层。
+# ---------------------------------------------------------------------------
