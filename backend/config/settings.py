@@ -6,7 +6,9 @@ from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# 测试运行器不该被密钥检查挡住：它既不需要真实密钥，也不发真 cookie。
+# 测试运行器不该被"没设密钥"挡住：仓库克隆下来直接跑 manage.py test 时，
+# 环境里通常什么都没有。但**显式给了模板里的占位值**仍然要报错 —— 那正是
+# 这条检查要拦的情况，放行就等于这条防线可以被一段配置绕过。
 RUNNING_TESTS = "test" in sys.argv or os.environ.get("WIGOS_RUNNING_TESTS") == "1"
 
 # DEBUG 默认关闭。原版默认 true，而 `.env.example` 又把 true 抄进去了，于是
@@ -19,18 +21,24 @@ DEBUG = os.environ.get("DJANGO_DEBUG", "false").lower() == "true"
 _INSECURE_SECRET_KEYS = {
     "insecure-dev-key-change-me",
     "change-me-in-dev",
-    "",
 }
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "")
-if not SECRET_KEY or SECRET_KEY in _INSECURE_SECRET_KEYS:
+if not SECRET_KEY:
+    # 完全没设：开发/测试给一个临时值，生产拒绝启动。
     if DEBUG or RUNNING_TESTS:
         SECRET_KEY = "insecure-dev-key-change-me"
     else:
         raise ImproperlyConfigured(
-            "DJANGO_SECRET_KEY 未设置或仍是模板里的占位值。"
-            "生产环境请生成一个随机密钥，例如："
+            "DJANGO_SECRET_KEY 未设置。生产环境请生成一个随机密钥，例如："
             "python -c \"import secrets; print(secrets.token_urlsafe(50))\""
         )
+elif SECRET_KEY in _INSECURE_SECRET_KEYS and not DEBUG:
+    # 显式用了仓库里公开的占位值：任何情况下都不放行。
+    raise ImproperlyConfigured(
+        "DJANGO_SECRET_KEY 仍是模板里的占位值，这个值在仓库里公开，"
+        "拿它签的 session cookie 可以伪造。请生成一个随机密钥："
+        "python -c \"import secrets; print(secrets.token_urlsafe(50))\""
+    )
 
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,backend").split(",")
 
@@ -230,12 +238,15 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.AllowAny",
     ],
-    # 原版不配限流，登录接口可以无限次爆破。这里给登录加一道，其余接口保持
-    # 不限制（目录收割/公开读取会高频调用，限流反而会挡住正常对接）。
-    # 速率可用环境变量覆盖；部署多个 worker 时计数是各进程独立的，要真正生效
-    # 请配 Redis/Memcached 作缓存后端。
+    # 原版不配限流，登录接口可以无限次爆破。这里两道闸：
+    #   1. 这是个速率闸（瞬时洪泛），30 次/分钟；
+    #   2. api/auth.py 里还有一个按 15 分钟窗口累计失败次数的锁定（10 次），
+    #      那道闸才是真正防慢速爆破的 —— 速率闸对"每分钟 9 次"永远够不着。
+    # 速率设成 30 而不是 10，是因为它不该先于失败计数触发：一个正常用户输错
+    # 十几次再想起来正确口令，不该被速率闸挡在外面。
+    # 部署多个 worker 时计数是各进程独立的，要真正生效请配 Redis/Memcached。
     "DEFAULT_THROTTLE_RATES": {
-        "login": os.environ.get("LOGIN_THROTTLE_RATE", "10/min"),
+        "login": os.environ.get("LOGIN_THROTTLE_RATE", "30/min"),
     },
     # DRF 默认把 `?format=` 当成「选渲染器」的开关（URL_FORMAT_OVERRIDE）。本项目的
     # 导出接口自己用 `?format=csv|json|xml` 表示文件格式，两个含义撞在一起：

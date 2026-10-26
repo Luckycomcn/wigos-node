@@ -50,15 +50,16 @@ def _client_ip(request):
 
 
 class LoginRateThrottle(AnonRateThrottle):
-    """按 IP 限制登录尝试次数。
+    """按 IP 限制登录尝试的**速率**（每分钟多少次请求）。
 
-    原版没有任何限流：`REST_FRAMEWORK` 不配 DEFAULT_THROTTLE_CLASSES，登录
-    接口也是不加限制的，口令强度只靠 AUTH_PASSWORD_VALIDATORS。对公网实例
-    这意味着可以无限次爆破。
+    这是第一道闸，防的是"一秒几百次"的暴力扫描。第二道是下面按 15 分钟窗口
+    累计失败次数的锁定（FAILURE_LIMIT），防的是"慢速爆破"—— 每分钟 9 次，
+    速率闸永远够不着，但一小时能试 540 个口令。
 
-    这里按 IP 计数，用缓存后端（默认 locmem，多进程部署请配 Redis/Memcached，
-    否则每个 worker 各算各的）。scope 名与 settings 的 DEFAULT_THROTTLE_RATES
-    里的 "login" 对应。
+    两道都留着：只留速率闸挡不住慢速爆破，只留计数据挡不住瞬时洪泛
+    （计数器要等写缓存，洪泛会在写之前就把 CPU 打满）。
+
+    scope 名与 settings 的 DEFAULT_THROTTLE_RATES 里的 "login" 对应。
     """
 
     scope = "login"
@@ -67,8 +68,7 @@ class LoginRateThrottle(AnonRateThrottle):
         return self.cache_format % {"scope": self.scope, "ident": _client_ip(request)}
 
 
-# 失败一次记一笔（成功不清零）：爆破的特征是"同一 IP 大量失败"，
-# 只要能登进来就说明不是爆破，所以成功后清零反而更精确。见 login()。
+# 失败一次记一笔（成功清零）：爆破的特征是"同一 IP 大量失败"。
 FAILURE_KEY = "wigos:login-failures:{ip}"
 FAILURE_WINDOW = 900  # 15 分钟
 FAILURE_LIMIT = 10

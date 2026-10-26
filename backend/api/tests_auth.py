@@ -4,12 +4,15 @@
 1. 匿名访问 my_issuer_of_identifiers 必须 401，而不是 500（BUG-04）；
 2. 登录失败累积到阈值后必须被锁住（BUG-21），而成功一次就解锁。
 """
+from unittest.mock import patch
+
+from django.conf import settings
 from django.core.cache import cache
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .auth import FAILURE_KEY, FAILURE_LIMIT
+from .auth import FAILURE_KEY, FAILURE_LIMIT, LoginRateThrottle
 from .models import WIGOSNodeUser
 
 
@@ -43,7 +46,10 @@ class LoginThrottleTests(APITestCase):
         cache.clear()
 
     def _post(self, password):
-        return self.client.post(self.url, {"username": "throttle@example.com", "password": password})
+        # 绕开 DRF 的每分钟速率闸，专测按窗口累计失败次数的锁定。
+        # 两道闸是独立的，混在一起测会让"速率闸触发"看起来像"计数闸的 bug"。
+        with patch.object(LoginRateThrottle, "allow_request", return_value=True):
+            return self.client.post(self.url, {"username": "throttle@example.com", "password": password})
 
     def test_failures_accumulate_and_lock(self):
         for i in range(FAILURE_LIMIT):
@@ -58,9 +64,18 @@ class LoginThrottleTests(APITestCase):
         self._post("wrong")
         ok = self._post("correct-horse!")
         self.assertEqual(ok.status_code, status.HTTP_200_OK)
+        self.assertEqual(cache.get(FAILURE_KEY.format(ip="127.0.0.1"), 0), 0)
         # 清零之后又能承受整轮失败。
         for _ in range(FAILURE_LIMIT - 1):
             self.assertEqual(self._post("wrong").status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_rate_throttle_is_wired(self):
+        """速率闸必须真的挂在登录视图上（而不是只在 settings 里配了一个数字）。"""
+        from .auth import login as login_view
+
+        self.assertTrue(login_view.cls.throttle_classes or getattr(login_view, "cls", None))
+        self.assertEqual(LoginRateThrottle.scope, "login")
+        self.assertIn("login", settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"])
 
     def test_counter_key_is_per_address(self):
         self._post("wrong")
