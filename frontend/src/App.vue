@@ -9,6 +9,7 @@ import LocaleSwitcher from "./components/LocaleSwitcher.vue";
 import ChangePasswordDialog from "./components/ChangePasswordDialog.vue";
 import UserAdminPanel from "./components/UserAdminPanel.vue";
 import WsiRegistryPanel from "./components/WsiRegistryPanel.vue";
+import MapManagerPanel from "./components/MapManagerPanel.vue";
 import ToolsPanel from "./components/ToolsPanel.vue";
 import { useAuth } from "./composables/useAuth";
 import { useLocale } from "./composables/useLocale";
@@ -41,18 +42,15 @@ const selected = ref(new Set());
 
 const isStaff = computed(() => Boolean(user.value?.is_staff));
 
-// 顶部导航项。'list' 是主视图，其余是并列的功能页。
-const navItems = computed(() => {
-  const items = [
-    { value: "list", title: t("nav.stations"), icon: "mdi-format-list-bulleted" },
-    { value: "tools", title: t("nav.tools"), icon: "mdi-database-arrow-up-down" },
-    { value: "registry", title: t("nav.wsiRegistry"), icon: "mdi-shield-key-outline" },
-  ];
-  if (isStaff.value) {
-    items.push({ value: "users", title: t("nav.users"), icon: "mdi-account-group-outline" });
-  }
-  return items;
-});
+// 顶部导航项。这里只放"日常操作"两页：我的台站、导入导出。
+// 用户管理 / WSI 注册表 / 地图管理都是"配置性质、偶尔进一次"的管理动作，
+// 统一收进右上角的「管理」菜单——它们若同时出现在导航条和菜单里就是重复入口
+// （上一版正是如此，导航条第二行既有它们、菜单里也有，用户看不到白底白字的
+// 那一行、又以为功能丢了）。导航条保持精简。
+const navItems = computed(() => [
+  { value: "list", title: t("nav.stations"), icon: "mdi-format-list-bulleted" },
+  { value: "tools", title: t("nav.tools"), icon: "mdi-database-arrow-up-down" },
+]);
 
 // 当前高亮的导航项：新建/编辑/批量都属于"我的台站"这个区。
 const activeNav = computed(() =>
@@ -105,6 +103,9 @@ async function handleLogout() {
               </v-list-item>
               <v-list-item prepend-icon="mdi-shield-key-outline" @click="go('registry')">
                 <v-list-item-title>{{ t("nav.wsiRegistry") }}</v-list-item-title>
+              </v-list-item>
+              <v-list-item prepend-icon="mdi-map-outline" @click="go('map')">
+                <v-list-item-title>{{ t("nav.mapSettings") }}</v-list-item-title>
               </v-list-item>
             </v-list>
           </v-menu>
@@ -170,6 +171,7 @@ async function handleLogout() {
           <ToolsPanel v-else-if="view.mode === 'tools'" @close="view = { mode: 'list' }" />
           <WsiRegistryPanel v-else-if="view.mode === 'registry'" @close="view = { mode: 'list' }" />
           <UserAdminPanel v-else-if="view.mode === 'users'" @close="view = { mode: 'list' }" />
+          <MapManagerPanel v-else-if="view.mode === 'map'" @close="view = { mode: 'list' }" />
         </template>
       </v-container>
     </v-main>
@@ -199,14 +201,26 @@ async function handleLogout() {
   font-size: 0.9rem;
 }
 
-/* 导航条在顶栏的 extension 区里，跟顶栏连成一体。
-   extension 的宽度由 Vuetify 撑满，不再需要左右 padding 对齐顶栏内容。 */
+/* 导航条在顶栏的 extension 区里。背景是浅色，但 `.app-bar` 上的
+   `color:#fff !important` 会一路继承进 extension —— 上一版正是这样变成
+   "白底白字、整行看不见"。这里必须显式把文字颜色改回深色，不能指望继承。
+   v-tab 自身的颜色由 Vuetify 的 color/oncolor 控制，这里只兜住容器文字。 */
 .nav-tabs {
   background: #f8fafc;
   border-bottom: 1px solid #e2e8f0;
   padding: 0 1rem;
   flex: 1 1 auto;
   height: 48px;
+  color: #334155 !important;
+}
+
+.nav-tabs :deep(.v-tab) {
+  color: #475569;
+  opacity: 1;
+}
+
+.nav-tabs :deep(.v-tab--selected) {
+  color: #1d4ed8;
 }
 
 .app-main {

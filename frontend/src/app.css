@@ -105,7 +105,7 @@ h3 {
   font-size: 0.8rem;
 }
 
-/* 没有配置底图时的地图画布：给一个浅色背景 + 经纬网格感，
+/* 没有可用底图（如天地图未配令牌）时的地图画布：给一个浅色背景 + 经纬网格感，
    代替原版在离线环境里一片灰块的样子。 */
 .leaflet-no-basemap {
   background-color: #f1f5f9;
@@ -113,4 +113,10 @@ h3 {
     linear-gradient(to right, rgba(148, 163, 184, 0.25) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(148, 163, 184, 0.25) 1px, transparent 1px);
   background-size: 64px 64px;
+}
+
+/* 离线矢量底图（Natural Earth 国界）：容器本身是"海面"，陆块由 geojson
+   多边形填充。颜色刻意克制，台站圆点（#3b82f6 系）在上面仍清晰。 */
+.leaflet-offline-basemap {
+  background-color: #dceaf7;
 }

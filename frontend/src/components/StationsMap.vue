@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, shallowRef, watch } from "vue";
 import L from "leaflet";
-import { MARKER_STYLE, createBaseMap } from "../leafletMap";
+import { MARKER_STYLE, createBaseMap, activeBasemapId } from "../leafletMap";
 import i18n from "../i18n";
 
 const props = defineProps({ stations: { type: Array, required: true } });
@@ -64,18 +64,26 @@ function destroyMap() {
   markers = null;
 }
 
-function buildMap() {
+function buildMap({ preserveView = false } = {}) {
+  // preserveView：切底图时保住用户当前视野，不重新 fitBounds——用户可能
+  // 已经放大到本国台站群，甩回全球视图会很突兀。初次构建仍自动适配台站。
+  const preserved =
+    preserveView && map ? { center: map.getCenter(), zoom: map.getZoom() } : {};
   destroyMap();
   const element = container.value;
   if (!element) return;
-  map = createBaseMap(element);
+  map = createBaseMap(element, preserved);
   markers = L.layerGroup().addTo(map);
-  drawMarkers(map.getZoom());
-  fitToMarkers();
+  if (preserveView) {
+    drawMarkers(map.getZoom());
+  } else {
+    drawMarkers(map.getZoom());
+    fitToMarkers();
+  }
 }
 
 // The container only exists while there's something to show.
-watch(container, buildMap, { flush: "post" });
+watch(container, () => buildMap(), { flush: "post" });
 
 watch(positioned, () => {
   if (!map) return;
@@ -85,7 +93,10 @@ watch(positioned, () => {
 
 // Leaflet reads its control strings once, when the control is built, so a
 // language change has to rebuild the map for the zoom buttons to follow.
-watch(i18n.global.locale, buildMap);
+watch(i18n.global.locale, () => buildMap());
+
+// 「地图管理」切换底图 → 用新底图重建，保住当前视野。
+watch(activeBasemapId, () => buildMap({ preserveView: true }));
 
 onBeforeUnmount(destroyMap);
 </script>

@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, shallowRef, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import L from "leaflet";
-import { MARKER_STYLE, createBaseMap } from "../leafletMap";
+import { MARKER_STYLE, createBaseMap, activeBasemapId } from "../leafletMap";
 import i18n from "../i18n";
 
 const { t } = useI18n();
@@ -35,14 +35,18 @@ function showPosition() {
 }
 
 function buildMap() {
+  // 保住当前视野再重建：切底图/切语言都不该把用户正在看的位置甩回世界视图。
+  const preserved = map ? { center: map.getCenter(), zoom: map.getZoom() } : {};
   map?.remove();
-  map = createBaseMap(container.value);
+  map = createBaseMap(container.value, preserved);
   showPosition();
 }
 
 onMounted(buildMap);
 // Leaflet bakes its control strings in at creation, so follow the language.
 watch(i18n.global.locale, buildMap);
+// 「地图管理」里切换底图 → 重建底图图层（视野由 buildMap 保住）。
+watch(activeBasemapId, buildMap);
 // Compare by value: the computed returns a new array on every change.
 watch(() => position.value?.join(","), () => map && showPosition());
 onBeforeUnmount(() => map?.remove());
