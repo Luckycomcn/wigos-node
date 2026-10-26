@@ -9,14 +9,26 @@ varying(255)``，对客户端表现为 500。
 （WMDR 里 ``additionalIds`` 本来就是数组，没有数量上限）。写入失败发生在
 ``station.save()``，用户填完的表单会整份丢掉。
 
-改 text 之后，长度限制交给应用层（WMDR2 schema 里没有上限，也不该在数据库这里
-凭空设一个）。索引保留：``db_index=True`` 对 text 一样有效，前缀查询走
-``LIKE '%,wsi,%'`` 用的是同一个索引。
+改 text 之后，长度限制交给应用层。
+
+⚠️ 生成列不能用 ``ALTER COLUMN ... TYPE text`` —— PostgreSQL 直接拒绝：
+    ERROR: cannot specify USING when altering type of generated column
+所以这里先 DROP 再 ADD。这一列的值完全由 ``wmdrv2`` 派生，删掉不会丢任何
+用户数据；重建时数据库按原表达式把值再算一遍。
 """
 
 from django.db import migrations, models
 
 import api.models
+
+FIELD_KWARGS = dict(
+    db_index=True,
+    db_persist=True,
+    expression=api.models.ExtractAndJoinJson(
+        models.F("wmdrv2"), models.Value("$.properties.additionalIds[*]")
+    ),
+    output_field=models.TextField(),
+)
 
 
 class Migration(migrations.Migration):
@@ -26,19 +38,13 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        # 生成列的表达式不变，只把输出类型放宽。Django 会走
-        # ALTER TABLE ... ALTER COLUMN ... TYPE text，生成列需要先删后建，
-        # 但 GeneratedField 的 AlterField 已经把这件事包含在内。
-        migrations.AlterField(
+        migrations.RemoveField(
             model_name="station",
             name="additional_wigos_identifiers",
-            field=models.GeneratedField(
-                db_index=True,
-                db_persist=True,
-                expression=api.models.ExtractAndJoinJson(
-                    models.F("wmdrv2"), models.Value("$.properties.additionalIds[*]")
-                ),
-                output_field=models.TextField(),
-            ),
+        ),
+        migrations.AddField(
+            model_name="station",
+            name="additional_wigos_identifiers",
+            field=models.GeneratedField(**FIELD_KWARGS),
         ),
     ]
