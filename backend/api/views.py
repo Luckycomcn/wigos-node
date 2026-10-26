@@ -5,6 +5,8 @@ from pathlib import Path
 import django.http
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Q
+from django.http import JsonResponse
 from rest_framework import status
 from rest_framework.decorators import (
     api_view,
@@ -46,31 +48,169 @@ def hello(request):
     return Response({"message": "Hello from Django!"})
 
 
-@api_view(["POST"])
+@api_view(["GET", "POST"])
 def geojson(request):
-    body = request.data
-    if body.get("type") != "Feature" or "geometry" not in body:
-        return Response({"detail": "Payload must be a GeoJSON Feature"}, status=400)
-    return Response({"received": body}, status=201)
+    """GeoJSON 出入口。
+
+    原版只接受 POST，GET 返回 405；而 POST 的实现只是把入参原样回显，既不
+    校验也不落库 —— 对 GIS 客户端来说是个假接口。这里两边都做实：
+
+      GET  → 已发布台站的 FeatureCollection（GIS 客户端直接可画）
+      POST → 接收 Feature 或 FeatureCollection，走与 /api/wmdrv2/ 相同的
+             校验与权限路径后落库
+    """
+    if request.method == "GET":
+        include_archived = request.query_params.get("include_archived") in ("1", "true", "yes")
+        queryset = Station.objects.filter(wmdrv2__isnull=False)
+        if not include_archived:
+            queryset = queryset.filter(archived=False)
+        editable = stations.editable_station_ids(request.user)
+        features = [
+            {
+                "type": "Feature",
+                "id": station.wigos_identifier,
+                "geometry": station.wmdrv2.get("geometry"),
+                "properties": station.wmdrv2.get("properties", {}),
+            }
+            for station in queryset
+            # 草稿是未完成的工作，只有能改它的人看得见（与 my_stations 一致）
+            if station.status != Station.DRAFT or station.id in editable
+        ]
+        return Response({"type": "FeatureCollection", "features": features})
+
+    if not request.user.is_authenticated:
+        return Response(
+            {"detail": "Authentication credentials were not provided."},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    body = request.data if isinstance(request.data, dict) else {}
+    if body.get("type") == "FeatureCollection":
+        incoming = body.get("features")
+        if not isinstance(incoming, list):
+            return Response({"detail": "A FeatureCollection needs a 'features' array."}, status=400)
+    elif body.get("type") == "Feature":
+        incoming = [body]
+    else:
+        return Response({"detail": "Payload must be a GeoJSON Feature or FeatureCollection."}, status=400)
+
+    created, failures = [], []
+    for index, feature in enumerate(incoming):
+        if not isinstance(feature, dict) or "geometry" not in feature:
+            failures.append({"index": index, "detail": "Not a GeoJSON Feature."})
+            continue
+        try:
+            station = stations.create_station(request.user, feature)
+        except StationError as e:
+            failures.append({"index": index, "detail": e.message})
+            continue
+        created.append({"index": index, "station_id": station.id, "wsi": station.wigos_identifier})
+
+    payload = {"created": created, "failed": failures}
+    if not created:
+        payload["detail"] = "No feature could be stored."
+        return Response(payload, status=400)
+    return Response(payload, status=201)
+
+
+def api_not_found(request, *args, **kwargs):
+    """`/api/` 下没有匹配到任何路由时的兜底。
+
+    原版走 Django 默认的 404，返回的是 HTML 页面（`<!doctype html>...<title>
+    Not Found</title>`）。SPA 的 fetch 拿到的 `res.json()` 会直接抛解析错误，
+    调用方拿不到任何可判断的信息。统一成 JSON，并把可用路径列出来。
+    """
+    return JsonResponse(
+        {
+            "detail": "Not found.",
+            "path": request.path,
+            "hint": "See /api/ for the available endpoints, or check the HTTP method.",
+        },
+        status=404,
+    )
+
+
+MY_STATIONS_DEFAULT_LIMIT = 50
+MY_STATIONS_MAX_LIMIT = 500
+
+
+def _int_param(request, name, default, maximum=None, minimum=0):
+    """把查询参数解析成整数。非数字/越界一律夹到合法区间，不抛 500 ——
+    `?limit=abc` 是调用方的笔误，不该让整个列表接口挂掉。"""
+    raw = request.query_params.get(name)
+    if raw in (None, ""):
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    if value < minimum:
+        return minimum
+    if maximum is not None and value > maximum:
+        return maximum
+    return value
 
 
 @api_view(["GET"])
 def my_stations(request):
-    # F-19: archived records are hidden unless explicitly requested.
+    """当前用户可见的台站列表。
+
+    原版不判登录就直接返回全部台站（匿名可见），且无分页、无搜索 ——
+    台站上千条时一次性全量返回。这里三件事都补上：
+
+      ?q=           按 WSI 或名称模糊搜索
+      ?status=      只看 draft / submitted
+      ?limit=&offset=  分页，默认 50 条，上限 500；limit=0 表示不分页（导出用）
+      ?include_archived=1  含已归档
+
+    总数放在 X-Total-Count 响应头里，响应体仍是数组，既有调用方不用改。
+    另外 `editable_count` 也放在头里，前端"全选可编辑"不必自己数。
+    """
+    if not request.user.is_authenticated:
+        # "my_stations" 的语义就是"我的"。原版对匿名返回全量，既与名字相反，
+        # 也是公网部署的暴露面。公开读取走 /api/wmdrv2/wsi/<wsi> 与
+        # /api/records/collections/... —— 那些才是面向目录收割的接口。
+        return Response(
+            {"detail": "Authentication credentials were not provided."},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
     include_archived = request.query_params.get("include_archived") in ("1", "true", "yes")
-    my_stations = Station.objects.filter(wmdrv2__isnull=False)
+    queryset = Station.objects.filter(wmdrv2__isnull=False)
     if not include_archived:
-        my_stations = my_stations.filter(archived=False)
+        queryset = queryset.filter(archived=False)
+
+    status_filter = (request.query_params.get("status") or "").strip().lower()
+    if status_filter in (Station.DRAFT, Station.SUBMITTED):
+        queryset = queryset.filter(status=status_filter)
+
+    keyword = (request.query_params.get("q") or "").strip()
+    if keyword:
+        queryset = queryset.filter(
+            Q(wigos_identifier__icontains=keyword) | Q(name__icontains=keyword)
+        )
+
+    queryset = queryset.order_by("id")
+
     editable = stations.editable_station_ids(request.user)
 
     # 方案 5.6：草稿是未完成的工作，不该出现在别人的列表里。
     # 只有能改这条记录的人（owner / issuer 组 / 超管）看得到自己的草稿。
     visible = [
         station
-        for station in my_stations
+        for station in queryset
         if station.status != Station.DRAFT or station.id in editable
     ]
-    return Response([
+
+    total = len(visible)
+    limit = _int_param(request, "limit", MY_STATIONS_DEFAULT_LIMIT, MY_STATIONS_MAX_LIMIT)
+    offset = _int_param(request, "offset", 0)
+    if limit:
+        visible = visible[offset:offset + limit]
+    elif offset:
+        visible = visible[offset:]
+
+    response = Response([
         {
             "station_id": station.id,
             "wsi": station.wigos_identifier,
@@ -83,6 +223,11 @@ def my_stations(request):
         }
         for station in visible
     ])
+    response["X-Total-Count"] = str(total)
+    response["X-Editable-Count"] = str(len(editable))
+    # 分页参数会变，别让中间层缓存住第一页。
+    response["Vary"] = "Cookie"
+    return response
 
 @api_view(["GET"])
 def check_wigosidentifiers(request):
@@ -94,6 +239,13 @@ def check_wigosidentifiers(request):
 
 @api_view(["GET"])
 def my_issuer_of_identifiers(request):
+    # 未登录时必须先返回 401。原来的写法直接拿 request.user 去过滤，AnonymousUser
+    # 没有主键，Django 抛 TypeError -> 500（这是全后端唯一没有测试覆盖的接口）。
+    if not request.user.is_authenticated:
+        return Response(
+            {"detail": "Authentication credentials were not provided."},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
     groups = WIGOSNodeGroup.objects.filter(group__user=request.user)
     issuer_identifiers = [group.issuer_identifier for group in groups]
     return Response({"issuer_of_identifiers": issuer_identifiers})    
@@ -125,6 +277,11 @@ class Wmdrv2View(APIView):
         except Station.DoesNotExist:
             return Response({"detail": f"Station {station_id} not found"}, status=404)
 
+        # 草稿只对能改它的人可见；匿名/他人拿到 404 而不是 403，
+        # 免得把"这个 id 有一条草稿"这个事实泄露出去。
+        if station.status == Station.DRAFT and station.id not in stations.editable_station_ids(request.user):
+            return Response({"detail": f"Station {station_id} not found"}, status=404)
+
         return Response(station.wmdrv2)
 
     def put(self, request, station_id=None):
@@ -147,7 +304,7 @@ class Wmdrv2View(APIView):
             return _error_response(e)
 
         return Response({
-            "message": f"WMDv2 data for station {station_id} updated successfully.",
+            "message": f"WMDR2 data for station {station_id} updated successfully.",
             "station_id": station.id,
             "status": station.status,
             # 草稿才可能有 schema 问题（严格模式下 validate 早抛 400 了）
@@ -197,9 +354,12 @@ class Wmdrv2ByWsiView(APIView):
     renderer_classes = [CompactJSONRenderer]
 
     def get(self, request, wsi):
+        # 匿名可读（目录收割要用），但草稿不能从这里漏出去 ——
+        # 它是未完成的工作，只在"谁能改它"的界面里出现。
+        visible = Station.objects.exclude(status=Station.DRAFT)
         station = (
-            Station.objects.filter(wigos_identifier=wsi).first()
-            or Station.objects.with_additional_wigos_identifier(wsi).first()
+            visible.filter(wigos_identifier=wsi).first()
+            or visible.with_additional_wigos_identifier(wsi).first()
         )
         if station is None:
             return Response({"detail": f"No station with WIGOS identifier {wsi}"}, status=404)

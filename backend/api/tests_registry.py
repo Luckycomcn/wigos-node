@@ -4,8 +4,8 @@
 
     python manage.py test api.tests_registry -v 2
 
-预置用户来自 migration 0007：test_user1 / test_password1，属于
-nfps_Switzerland 与 nfps_Brazil 两个 issuer 组。
+用例自己建账号，不依赖迁移里预置的演示数据 —— 迁移 0007 的 test_user1 现在
+只在 WIGOS_SEED_DEMO=true 时才会建，测试库永远不灌（见该迁移的说明）。
 """
 from django.urls import reverse
 from rest_framework import status
@@ -19,6 +19,9 @@ from .testing_utils import load_test_json
 class RegistryAuthTests(APITestCase):
     def setUp(self):
         self.url = reverse("wsi-allocations")
+        self.user = WIGOSNodeUser.objects.create_user(
+            username="registry_plain", email="registry_plain@example.com", password="pw12345!"
+        )
 
     def test_list_requires_login(self):
         response = self.client.get(self.url)
@@ -29,7 +32,8 @@ class RegistryAuthTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_audit_requires_staff(self):
-        self.client.login(username="test_user1", password="test_password1")
+        # 普通用户（非 staff）看不了审计日志。
+        self.client.force_login(self.user)
         response = self.client.get(reverse("audit-log"))
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
@@ -37,9 +41,9 @@ class RegistryAuthTests(APITestCase):
 class AllocationCrudTests(APITestCase):
     def setUp(self):
         # 注册表写权限按 issuer 判定（_can_manage）：staff，或属于该 issuer 的用户组。
-        # 预置的 test_user1 只属 nfps_Switzerland / nfps_Brazil（issuer 756 / 76），
-        # 拿它去管 issuer 20000 会得到 403 —— 那不是被测的东西。
         # 这里自建超管，把 issuer 组这道前置条件绕开，专测 CRUD 本身。
+        # （原版注释引用迁移 0007 预置的 test_user1，那条演示账号现在只在
+        #  WIGOS_SEED_DEMO=true 时才会建，测试库拿不到。）
         self.user = WIGOSNodeUser.objects.create_superuser(
             username="registry_admin", email="registry_admin@example.com", password="pw12345!"
         )
@@ -151,9 +155,7 @@ class PublishAuthorityTests(APITestCase):
     """发布权威性：WSI 不在授权范围内就地在本地拒绝，并留痕。"""
 
     def setUp(self):
-        # 迁移只预置了 test_user1（属 nfps_Switzerland/nfps_Brazil，即 issuer
-        # 756/76），演示记录用的是 issuer 20000 —— 用它必然被 check_issuers 403，
-        # 我们这里要测的是"WSI 授权范围"这道独立的闸，不该被别的门槛挡住。
+        # 这里要测的是"WSI 授权范围"这道独立的闸，不该被别的门槛挡住。
         # 所以自建超管 + 自建站点，把 issuer 组这套前置条件绕开。
         self.user = WIGOSNodeUser.objects.create_superuser(
             username="authority_admin", email="authority_admin@example.com", password="pw12345!"

@@ -4,8 +4,9 @@
 
     python manage.py test api.tests_draft -v 2
 
-这里刻意自建超管而不是用预置的 test_user1：后者只属于 nfps_Switzerland /
-nfps_Brazil（issuer 756 / 76），而演示记录用的是 issuer 20000，用它会被
+这里刻意自建超管而不是复用迁移里的演示账号：演示账号现在只在
+WIGOS_SEED_DEMO=true 时才会建（测试库永远不灌），且即便存在也只属于
+nfps_Switzerland / nfps_Brazil（issuer 756 / 76），而演示记录用的是 issuer 20000，用它会被
 check_issuers 拦在 403 —— 那就测不到工作流本身了。
 """
 from django.urls import reverse
@@ -120,13 +121,24 @@ class DraftVisibilityTests(APITestCase):
         self.assertEqual(draft_row["status"], Station.DRAFT)
 
     def test_draft_hidden_from_anonymous(self):
+        # `my_stations` 现在需要登录（BUG-09）。匿名拿不到任何列表，
+        # 草稿自然也就看不到 —— 直接的公开读取走 OGC API，那条路径要
+        # 自己额外过滤草稿（见 test_ogc_items_hide_drafts）。
         self.client.logout()
-        rows = self.client.get(self.list_url).json()
-        self.assertNotIn(self.station.wigos_identifier, self._wsis(rows))
+        response = self.client.get(self.list_url)
+        self.assertEqual(response.status_code, 401)
 
     def test_submitted_records_stay_public(self):
+        # "公开"指的是能被别的不相干用户看到，而不是能被匿名看到。
         self.station.status = Station.SUBMITTED
         self.station.save(update_fields=["status"])
-        self.client.logout()
+        self.client.force_login(self.other)
         rows = self.client.get(self.list_url).json()
         self.assertIn(self.station.wigos_identifier, self._wsis(rows))
+
+    def test_ogc_items_hide_drafts(self):
+        """OGC API 是给目录收割用的公开接口，草稿不能从这里漏出去。"""
+        self.client.logout()
+        body = self.client.get("/api/records/collections/wmdr/items").json()
+        ids = [f.get("id") for f in body.get("features", [])]
+        self.assertNotIn(self.station.wigos_identifier, ids)

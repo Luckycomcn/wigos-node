@@ -266,8 +266,13 @@ class BatchAPITestCase(APITestCase):
         self.client.force_authenticate(self.outsider)
         self.assertFalse(any(self.can_edit_map().values()))
 
+    def test_my_stations_requires_authentication(self):
+        """`my_stations` 的语义是"我的台站"。原版对匿名返回全量数据 ——
+        既与名字相反，也是公网部署的暴露面（BUG-09）。公开读取走
+        /api/wmdrv2/wsi/<wsi> 与 OGC API records，不受影响。"""
         self.client.force_authenticate(None)
-        self.assertFalse(any(self.can_edit_map().values()))
+        response = self.client.get(reverse('my_stations'))
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_single_put_validates_schema(self):
         self.client.force_authenticate(self.owner)
