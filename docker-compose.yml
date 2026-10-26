@@ -40,6 +40,10 @@ services:
     # 回滚就是换镜像。
     expose:
       - "8000"
+    # Django 的 admin 静态资源：entrypoint 里 collectstatic 写到这个卷，
+    # frontend 容器以只读方式挂同一个卷，nginx 直接从那里取。
+    volumes:
+      - staticfiles:/app/staticfiles
     depends_on:
       db:
         condition: service_healthy
@@ -47,6 +51,8 @@ services:
   frontend:
     build: ./frontend
     restart: unless-stopped
+    volumes:
+      - staticfiles:/app/staticfiles:ro
     ports:
       - "8080:80"
     depends_on:
@@ -54,3 +60,4 @@ services:
 
 volumes:
   db_data:
+  staticfiles:
