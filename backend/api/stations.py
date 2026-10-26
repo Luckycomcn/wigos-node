@@ -13,7 +13,7 @@ from django.db import IntegrityError
 from guardian.shortcuts import assign_perm, get_objects_for_user
 from jsonschema import Draft202012Validator
 
-from .models import Station, StationVersion, WIGOSNodeGroup
+from .models import ADDITIONAL_WSI_SEPARATOR, Station, StationVersion, WIGOSNodeGroup
 
 logger = logging.getLogger(__name__)
 
@@ -125,22 +125,40 @@ def check_issuers(user, wsis, action, issuers=None):
 def editable_station_ids(user):
     """IDs of the stations the user may change, by the same rules as
     update_station (object permission plus the issuer check on the stored
-    identifiers)."""
+    identifiers).
+
+    性能：原版 `for station in stations.only("id", "wmdrv2")` 会把**每一台**站的
+    完整 WMDR2 JSON（含全部观测、联系人、标识符数组）从库里读出来再解析，
+    只是为了拿里面的 WSI。台站上千条时，列表接口光这一项就要拉几十 MB。
+
+    两次查询搞定，且第二次只取两个小的生成列：
+      1. guardian 的 get_objects_for_user —— 拿到有对象权限的站；
+      2. 按 id 取 (wigos_identifier, additional_wigos_identifiers)。
+    这两个字段是 db_persist 的生成列，由数据库从 wmdrv2 里抽出来，值与
+    get_wigos_identifiers() 一致，但不需要传大 JSON。
+    """
     if not user.is_authenticated:
         return set()
     # Object permissions only, like user.has_perm('change_station', station):
     # issuer groups also hold the global change_station permission.
-    stations = get_objects_for_user(user, "api.change_station", klass=Station, accept_global_perms=False)
+    permitted = get_objects_for_user(
+        user, "api.change_station", klass=Station, accept_global_perms=False
+    )
     if user.is_superuser:
-        return set(stations.values_list("id", flat=True))
+        # 超管绕开 issuer 检查，也就没必要把标识符读出来了。
+        return set(permitted.values_list("id", flat=True))
+
     issuers = user_issuers(user)
+    rows = permitted.values_list("id", "wigos_identifier", "additional_wigos_identifiers")
     editable = set()
-    for station in stations.only("id", "wmdrv2"):
-        try:
-            check_issuers(user, station.get_wigos_identifiers(), "update", issuers)
-        except StationError:
-            continue
-        editable.add(station.id)
+    for station_id, primary, additional in rows:
+        # 生成列里附加标识符是 ",wsi1,wsi2," 这种形态（逗号不可能出现在 WSI 里）。
+        wsis = [primary] if primary else []
+        if additional:
+            wsis.extend(w for w in additional.split(ADDITIONAL_WSI_SEPARATOR) if w)
+        # 每台站都允许吗？等价于 check_issuers 的逐条判断，但不起异常、不重复算集合。
+        if all(issuer_of(wsi) in issuers for wsi in wsis):
+            editable.add(station_id)
     return editable
 
 

@@ -79,7 +79,10 @@ class Station(models.Model):
 
     additional_wigos_identifiers = models.GeneratedField(
         expression=ExtractAndJoinJson(F('wmdrv2'), Value('$.properties.additionalIds[*]')),
-        output_field=models.CharField(max_length=255),
+        # 原来是 CharField(max_length=255)：15 个 15 字符的 WSI 加分隔符正好 255，
+        # 第 16 个就 DataError（对客户端是 500）。字符串长度不该由数据库在这里
+        # 凭空限死 —— WMDR2 的 additionalIds 是数组，没有数量上限。
+        output_field=models.TextField(),
         db_persist=True,
         db_index=True,
     )

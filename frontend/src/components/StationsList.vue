@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import {
   archiveStation,
@@ -37,6 +37,7 @@ const headers = computed(() => [
 ]);
 
 const stations = ref([]);
+const total = ref(0);
 const loadState = ref({ status: "loading" });
 const busy = ref(false);
 const message = ref(null);
@@ -48,15 +49,51 @@ const toolsTab = ref("import");
 const registryOpen = ref(false);
 const usersOpen = ref(false);
 
+// BUG-18：原来只有两列、没有搜索、一次拉全量（items-per-page="-1"）。
+// 台站上百条时运维只能靠浏览器 Ctrl+F。这里改成服务端搜索 + 服务端分页。
+const search = ref("");
+const statusFilter = ref("all");
+const page = ref(1);
+const pageSize = ref(25);
+
+const PAGE_SIZES = [25, 50, 100];
+
+const statusOptions = computed(() => [
+  { title: t("list.filterAll"), value: "all" },
+  { title: t("list.statusActive"), value: "submitted" },
+  { title: t("list.statusDraft"), value: "draft" },
+]);
+
 async function load() {
   loadState.value = { status: "loading" };
   try {
-    stations.value = await listMyStations(showArchived.value);
+    const rows = await listMyStations(showArchived.value, {
+      q: search.value.trim() || undefined,
+      status: statusFilter.value === "all" ? undefined : statusFilter.value,
+      limit: pageSize.value,
+      offset: (page.value - 1) * pageSize.value,
+    });
+    stations.value = rows;
+    total.value = rows.total ?? rows.length;
     loadState.value = { status: "success" };
   } catch (err) {
     loadState.value = { status: "error", error: err.message };
   }
 }
+
+// 搜索与筛选改了要回到第一页，否则会停在一个空页面上。
+function reload(resetPage = true) {
+  if (resetPage) page.value = 1;
+  load();
+}
+
+let searchTimer = null;
+watch(search, () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => reload(), 250);
+});
+watch([statusFilter, pageSize, showArchived], () => reload());
+watch(page, () => load());
 
 async function run(action, successMessage) {
   busy.value = true;
@@ -97,12 +134,13 @@ function onHistory(station) {
 }
 
 // F-16: export the ticked records, or everything currently listed.
+// 注意：导出是服务端的全量导出（后端按 include_archived 取，不受分页限制），
+// 所以这里的 count 不能再用 stations.value.length —— 那只是当前页。
 function onExport(format) {
   const ids = selectedIds.value.length ? selectedIds.value : [];
   return run(
     () => exportStations(format, { stationIds: ids, includeArchived: showArchived.value }),
-    (result) =>
-      t("list.msgExported", { count: ids.length || stations.value.length, filename: result.filename }),
+    (result) => t("list.msgExported", { count: ids.length || total.value, filename: result.filename }),
   );
 }
 
@@ -130,12 +168,28 @@ const rowProps = ({ item }) => ({ class: selectedIds.value.includes(item.station
     <div class="list-header">
       <h3>{{ t("list.title") }}</h3>
       <div class="d-flex align-center ga-3">
+        <v-text-field
+          v-model="search"
+          :label="t('list.searchPlaceholder')"
+          prepend-inner-icon="mdi-magnify"
+          density="compact"
+          hide-details
+          clearable
+          single-line
+          class="list-search"
+        />
+        <v-select
+          v-model="statusFilter"
+          :items="statusOptions"
+          density="compact"
+          hide-details
+          class="list-status-filter"
+        />
         <v-switch
           v-model="showArchived"
           :label="t('list.showArchived')"
           density="compact"
           hide-details
-          @update:model-value="load"
         />
         <v-menu>
           <template #activator="{ props: menuProps }">
@@ -163,7 +217,9 @@ const rowProps = ({ item }) => ({ class: selectedIds.value.includes(item.station
 
     <p v-if="loadState.status === 'loading'">{{ t("list.loading") }}</p>
     <v-alert v-if="loadState.status === 'error'" type="error" variant="tonal">{{ t("common.error", { message: loadState.error }) }}</v-alert>
-    <p v-if="loadState.status === 'success' && stations.length === 0">{{ t("list.empty") }}</p>
+    <p v-if="loadState.status === 'success' && stations.length === 0">
+      {{ search.trim() || statusFilter !== 'all' ? t("list.emptyFiltered") : t("list.empty") }}
+    </p>
 
     <template v-if="stations.length > 0">
       <StationsMap :stations="stations.filter((s) => !s.archived)" />
@@ -234,6 +290,38 @@ const rowProps = ({ item }) => ({ class: selectedIds.value.includes(item.station
           </div>
         </template>
       </v-data-table>
+
+      <!-- 服务端分页：数据是按页取回来的，所以用后端返回的 total，
+           不能用 Vuetify 自己的客户端分页（它只认得当前这 25 行）。 -->
+      <div class="list-pager d-flex align-center ga-4 mt-3">
+        <span class="text-body-2">
+          {{ t("list.pageSummary", { from: total === 0 ? 0 : (page - 1) * pageSize + 1,
+                                     to: Math.min(page * pageSize, total), total }) }}
+        </span>
+        <v-select
+          v-model="pageSize"
+          :items="PAGE_SIZES"
+          density="compact"
+          hide-details
+          class="list-page-size"
+          :label="t('list.pageSize')"
+        />
+        <v-spacer />
+        <v-btn
+          variant="text"
+          icon="mdi-chevron-left"
+          :disabled="page <= 1 || loadState.status === 'loading'"
+          :aria-label="t('list.prevPage')"
+          @click="page -= 1"
+        />
+        <v-btn
+          variant="text"
+          icon="mdi-chevron-right"
+          :disabled="page * pageSize >= total || loadState.status === 'loading'"
+          :aria-label="t('list.nextPage')"
+          @click="page += 1"
+        />
+      </div>
     </template>
 
     <HistoryDialog v-model="historyOpen" :station-id="historyStationId" />
@@ -249,6 +337,8 @@ const rowProps = ({ item }) => ({ class: selectedIds.value.includes(item.station
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
   margin-bottom: 1rem;
   border-bottom: 1px solid #dbeafe;
   padding-bottom: 0.5rem;
@@ -260,6 +350,20 @@ const rowProps = ({ item }) => ({ class: selectedIds.value.includes(item.station
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: #2563eb;
+}
+
+/* 工具栏在窄屏上会挤成一团：搜索框给一个下限宽度，其余控件按内容收缩。 */
+.list-search {
+  min-width: 14rem;
+  max-width: 22rem;
+}
+
+.list-status-filter {
+  max-width: 11rem;
+}
+
+.list-page-size {
+  max-width: 7rem;
 }
 
 :deep(.row-selected) td {

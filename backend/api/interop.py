@@ -8,6 +8,7 @@ bypasses validation.
 import logging
 
 from django.db import transaction
+from django.db.models import Q
 from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework.permissions import SAFE_METHODS, AllowAny, BasePermission
@@ -39,6 +40,13 @@ def _selected_stations(request):
     queryset = Station.objects.filter(wmdrv2__isnull=False)
     if not include_archived:
         queryset = queryset.filter(archived=False)
+    # 导出是公开接口（匿名可调）。草稿只对能改它的人可见，否则它就从这里
+    # 绕过 my_stations 的可见性规则流到外面去。
+    if request.user.is_authenticated:
+        editable = stations.editable_station_ids(request.user)
+        queryset = queryset.exclude(Q(status=Station.DRAFT) & ~Q(id__in=editable))
+    else:
+        queryset = queryset.exclude(status=Station.DRAFT)
     if raw_ids:
         ids = []
         for raw in raw_ids:

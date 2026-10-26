@@ -863,6 +863,10 @@ class OgcItemsView(APIView):
             return error
 
         qs = Station.objects.filter(archived=False)
+        # 草稿是未完成的工作，只在"谁能改它"的界面里出现（my_stations）。
+        # OGC API 是给目录收割用的公开接口，匿名可达 —— 不过滤的话草稿会从这里
+        # 漏出去，绕过 my_stations 的可见性规则。
+        qs = qs.exclude(status=Station.DRAFT)
         if geometry is not None:
             qs = qs.filter(location__within=geometry)
         try:
@@ -902,8 +906,11 @@ class OgcItemView(APIView):
         if collection_id != COLLECTION_ID:
             return Response({"detail": f"Unknown collection '{collection_id}'"}, status=404)
         station = (
-            Station.objects.filter(wigos_identifier=wsi, archived=False).first()
-            or Station.objects.filter(archived=False).with_additional_wigos_identifier(wsi).first()
+            Station.objects.filter(wigos_identifier=wsi, archived=False)
+            .exclude(status=Station.DRAFT).first()
+            or Station.objects.filter(archived=False)
+            .exclude(status=Station.DRAFT)
+            .with_additional_wigos_identifier(wsi).first()
         )
         if station is None:
             return Response({"detail": f"No station with WIGOS identifier {wsi}"}, status=404)

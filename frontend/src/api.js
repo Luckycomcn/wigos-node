@@ -74,13 +74,28 @@ export async function saveStationsBatch(updates, { dryRun = false } = {}) {
   return data;
 }
 
-export async function listMyStations(includeArchived = false) {
-  const suffix = includeArchived ? "?include_archived=1" : "";
+export async function listMyStations(includeArchived = false, options = {}) {
+  const params = new URLSearchParams();
+  if (includeArchived) params.set("include_archived", "1");
+  const { q, status, limit, offset } = options || {};
+  if (q) params.set("q", q);
+  if (status) params.set("status", status);
+  // limit=0 表示"要全部"，导出与地图用；默认由后端给 50。
+  if (limit !== undefined && limit !== null) params.set("limit", String(limit));
+  if (offset) params.set("offset", String(offset));
+  const suffix = params.toString() ? `?${params}` : "";
   const res = handle401(await fetch(`${API_URL}/api/my_stations/${suffix}`, { credentials: "include" }));
   if (!res.ok) {
     throw new Error(translate("api.requestFailed", { status: res.status }));
   }
-  return res.json();
+  const rows = await res.json();
+  // 总数放在响应头里，响应体仍是数组 —— 既有调用方不用改。
+  const total = Number(res.headers.get("X-Total-Count"));
+  Object.defineProperty(rows, "total", {
+    value: Number.isFinite(total) ? total : rows.length,
+    enumerable: false,
+  });
+  return rows;
 }
 
 export async function listMyIssuers() {

@@ -9,7 +9,7 @@ location_expression = parse('$.geometry.coordinates')
 
 def update_station_geometry(station,wmdrv2_data):
     """
-    Update the geometry of a Station instance based on the provided WMDv2 data.
+    Update the geometry of a Station instance based on the provided WMDR2 data.
     """
     
     location_value = location_expression.find(wmdrv2_data)
