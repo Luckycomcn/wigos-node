@@ -36,7 +36,14 @@ class RegistryAuthTests(APITestCase):
 
 class AllocationCrudTests(APITestCase):
     def setUp(self):
-        self.client.login(username="test_user1", password="test_password1")
+        # 注册表写权限按 issuer 判定（_can_manage）：staff，或属于该 issuer 的用户组。
+        # 预置的 test_user1 只属 nfps_Switzerland / nfps_Brazil（issuer 756 / 76），
+        # 拿它去管 issuer 20000 会得到 403 —— 那不是被测的东西。
+        # 这里自建超管，把 issuer 组这道前置条件绕开，专测 CRUD 本身。
+        self.user = WIGOSNodeUser.objects.create_superuser(
+            username="registry_admin", email="registry_admin@example.com", password="pw12345!"
+        )
+        self.client.force_login(self.user)
         self.url = reverse("wsi-allocations")
 
     def test_create_and_list(self):
@@ -83,7 +90,11 @@ class AllocationCrudTests(APITestCase):
 
 class AllocationIoTests(APITestCase):
     def setUp(self):
-        self.client.login(username="test_user1", password="test_password1")
+        # 同上：导出的写前置动作也要能管 issuer 20000，所以用超管。
+        self.user = WIGOSNodeUser.objects.create_superuser(
+            username="registry_io_admin", email="registry_io@example.com", password="pw12345!"
+        )
+        self.client.force_login(self.user)
         self.url = reverse("wsi-allocations")
 
     def test_export_json(self):

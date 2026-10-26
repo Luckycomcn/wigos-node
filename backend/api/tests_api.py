@@ -15,6 +15,19 @@ from .testing_utils import load_test_json
 
 class StationAPITestCase(APITestCase):
 
+    def setUp(self):
+        # 参照站点由本用例自建，不再指望迁移 0011 灌演示数据
+        # （0011 现在只在 WIGOS_SEED_DEMO=true 时执行，测试库永不执行）。
+        # 两个 test_data 文件都要建，因为标识符交叉在这里：
+        #   test_wmdrv2.json             主标识 0-20000-0-123456
+        #   test_multiple_wsi_wdmdv2.json 主标识 0-20000-0-12345，
+        #                                 additionalIds 0-51-21-2121 / 0-533-1212-12321
+        owner = WIGOSNodeUser.objects.create_user(
+            username="api_owner", email="api_owner@example.com", password="pw12345!"
+        )
+        for name in ('test_wmdrv2.json', 'test_multiple_wsi_wdmdv2.json'):
+            Station.objects.create(wmdrv2=load_test_json(name), owner=owner)
+
     def test_check_wigosidentifiers(self):
         """Test that a GET request successfully retrieves WIGOS identifier checks."""
         self.checkwsi_url = reverse('check_wigosidentifiers')

@@ -132,6 +132,11 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.AllowAny",
     ],
+    # DRF 默认把 `?format=` 当成「选渲染器」的开关（URL_FORMAT_OVERRIDE）。本项目的
+    # 导出接口自己用 `?format=csv|json|xml` 表示文件格式，两个含义撞在一起：
+    # 请求 `?format=xml` 时 DRF 先去找 XMLRenderer，没配就抛 404，视图根本进不去。
+    # 关掉这个开关，`?format=` 就只是个普通查询参数。
+    "URL_FORMAT_OVERRIDE": None,
 }
 
 AUTHENTICATION_BACKENDS = (

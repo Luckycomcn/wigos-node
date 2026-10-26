@@ -141,7 +141,8 @@ class WsiAllocationDetailView(APIView):
         if not _can_manage(request.user, row.issuer_identifier):
             return Response({"detail": "You may not manage allocations for this centre-id."}, status=403)
 
-        data = dict(request.data)
+        # QueryDict 要先摊平，否则每个值都是列表（见 _scalar 的说明）。
+        data = {key: _scalar(value) for key, value in request.data.items()}
         payload = _allocation_payload({**row.as_export_dict(), **data}, partial=True)
         if "error" in payload:
             return Response(payload, status=400)
@@ -166,6 +167,19 @@ class WsiAllocationDetailView(APIView):
         return Response(status=204)
 
 
+def _scalar(value):
+    """把 QueryDict 里的单元素列表还原成标量。
+
+    DRF 的 request.data 在表单编码（multipart / urlencoded，也就是 PATCH 不带
+    JSON content-type 时的默认形态）下是 QueryDict，`dict()` 之后每个值都变成
+    列表 —— `int(["30"])` 必然抛异常，于是合法的 PATCH 被当成"值不是整数"退回
+    400。这里统一收口，两种编码走同一条路径。
+    """
+    if isinstance(value, (list, tuple)):
+        return value[-1] if value else None
+    return value
+
+
 def _allocation_payload(data, partial=False):
     """把请求体规整成 {issuer, series, numberFrom, numberTo, note}。
 
@@ -175,7 +189,7 @@ def _allocation_payload(data, partial=False):
     out = {"issuer": None, "series": 0, "numberFrom": None, "numberTo": None, "note": ""}
 
     for key in ("issuer", "series", "numberFrom", "numberTo"):
-        raw = data.get(key)
+        raw = _scalar(data.get(key))
         if raw in (None, ""):
             if key in required:
                 return {"error": f"'{key}' is required."}
@@ -184,7 +198,7 @@ def _allocation_payload(data, partial=False):
             out[key] = int(raw)
         except (TypeError, ValueError):
             return {"error": f"'{key}' must be an integer."}
-    out["note"] = str(data.get("note", "") or "")
+    out["note"] = str(_scalar(data.get("note")) or "")
 
     if out["numberFrom"] is not None and out["numberTo"] is not None:
         if out["numberFrom"] < 0 or out["numberTo"] < 0:
