@@ -11,7 +11,12 @@ body {
   margin: 0;
   background: #eff6ff;
   color: #0f172a;
-  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* 不再依赖 fonts.googleapis.com 的 Inter。内网/离线部署下那个请求必然
+     失败，浏览器要等到超时才放弃，而这段时间正文是用回退字体渲染的（会跳）。
+     系统字体栈在每个平台都已有可用的无衬线字体，视觉差异很小，但没有网络
+     依赖，也不向第三方暴露访问者。 */
+  font-family: system-ui, -apple-system, "Segoe UI", "Noto Sans", "PingFang SC",
+    "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
 }
 
 h1,
@@ -98,4 +103,14 @@ h3 {
 .field-message {
   margin-top: 0.3rem;
   font-size: 0.8rem;
+}
+
+/* 没有配置底图时的地图画布：给一个浅色背景 + 经纬网格感，
+   代替原版在离线环境里一片灰块的样子。 */
+.leaflet-no-basemap {
+  background-color: #f1f5f9;
+  background-image:
+    linear-gradient(to right, rgba(148, 163, 184, 0.25) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(148, 163, 184, 0.25) 1px, transparent 1px);
+  background-size: 64px 64px;
 }

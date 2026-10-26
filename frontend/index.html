@@ -3,12 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
+    <!-- 字体不再外链 fonts.googleapis.com。内网/离线部署（各国 NMHS 常见）下
+         那个请求必然失败，浏览器会一直等到超时，首屏白屏几秒；而且它是向
+         第三方暴露"这个节点有谁在访问"的渠道。改用系统字体栈，见 app.css。 -->
     <title>WMDR Station Builder</title>
   </head>
   <body>
