@@ -180,10 +180,23 @@ if SECURE_COOKIES:
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
-# 缓存：登录限流的计数器放这里。默认 locmem 是**每进程**独立的 —— 多 worker
-# 部署时实际速率 = 配置值 × worker 数。要精确控制请配 Redis/Memcached：
+# 缓存：登录限流的计数器放这里。
+#
+# ⚠️ 默认**不能**用 locmem。locmem 是进程内内存，而 gunicorn 是多进程的：
+# 每个 worker 各数各的，实际允许次数 = 配置值 × worker 数。实测 3 worker、
+# 连发 40 次错误口令，有 8 次漏过（返回 401 而非 429）—— 锁定形同虚设。
+# 而且单 worker 的开发/测试环境完全看不出来，是最容易漏检的一类缺陷。
+#
+# 所以默认落到 DatabaseCache：PostgreSQL 本来就是硬依赖，不需要额外装服务，
+# 离线服务器也能用。缺点是多一次写库，但登录是低频操作，可以接受。
+# 有条件的话配 Redis 更好：
 #   DJANGO_CACHE_URL=redis://127.0.0.1:6379/1
+# 注意 DatabaseCache 需要先建表（见 entrypoint.sh 的 createcachetable）。
 _cache_url = os.environ.get("DJANGO_CACHE_URL", "").strip()
+
+# 缓存表名。entrypoint.sh 里 createcachetable 用的也是它，别改歪。
+CACHE_TABLE = "wigos_cache"
+
 if _cache_url.startswith("redis://"):
     CACHES = {
         "default": {
@@ -198,11 +211,19 @@ elif _cache_url.startswith("memcached://"):
             "LOCATION": _cache_url.replace("memcached://", ""),
         }
     }
-else:
+elif RUNNING_TESTS:
+    # 测试不需要跨进程，也不想去建缓存表 —— 用例要的正是"计数器行为本身"。
     CACHES = {
         "default": {
             "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-            "LOCATION": "wigos-node",
+            "LOCATION": "wigos-node-tests",
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+            "LOCATION": CACHE_TABLE,
         }
     }
 

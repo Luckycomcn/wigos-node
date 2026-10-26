@@ -134,3 +134,42 @@ class SecurityDefaultTests(SimpleTestCase):
 
     def test_login_throttle_rate_configured(self):
         self.assertIn("login", settings.REST_FRAMEWORK.get("DEFAULT_THROTTLE_RATES", {}))
+
+
+class CacheBackendTests(SimpleTestCase):
+    """登录失败计数必须跨进程可见。
+
+    真机上暴露过一次：默认缓存是 LocMemCache，而 gunicorn 是 3 worker，
+    每个 worker 各数各的失败次数，等于把 10 次/15 分钟的锁定放宽成 30 次。
+    实测连发 40 次错误口令，有 8 次漏过（401 而非 429）。
+
+    开发态与测试态都是单进程，这个缺陷在那里**完全看不出来** —— 所以要靠
+    对配置本身的断言来守，而不是靠行为测试。
+    """
+
+    def test_default_cache_is_not_process_local(self):
+        """非测试、未配 DJANGO_CACHE_URL 时不能落到 locmem。"""
+        from pathlib import Path
+
+        source = (Path(settings.BASE_DIR) / "config" / "settings.py").read_text(encoding="utf-8")
+        # 生产分支（else:）里必须是 DatabaseCache，locmem 只能出现在测试分支。
+        self.assertIn("django.core.cache.backends.db.DatabaseCache", source,
+                      "默认缓存不是 DatabaseCache —— 多 worker 下限流会被放宽 N 倍")
+        # locmem 只允许在 RUNNING_TESTS 分支出现一次。
+        self.assertEqual(
+            source.count("locmem.LocMemCache"), 1,
+            "locmem 不应出现在生产分支里",
+        )
+
+    def test_test_run_uses_locmem(self):
+        """测试态用 locmem 是对的：不建表、行为足够。"""
+        self.assertIn("LocMemCache", settings.CACHES["default"]["BACKEND"])
+
+    def test_cache_table_named_and_referenced(self):
+        """缓存表名必须在 settings 与 entrypoint 里一致。"""
+        from pathlib import Path
+
+        self.assertTrue(getattr(settings, "CACHE_TABLE", ""), "CACHE_TABLE 未定义")
+        entrypoint = (Path(settings.BASE_DIR) / "entrypoint.sh").read_text(encoding="utf-8")
+        self.assertIn("createcachetable", entrypoint,
+                      "entrypoint 没建缓存表 —— 登录会因表不存在直接 500")
