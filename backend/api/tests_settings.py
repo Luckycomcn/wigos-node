@@ -76,3 +76,61 @@ class TrustedOriginTests(SimpleTestCase):
             import config.settings as s
 
             importlib.reload(s)
+
+class SecurityDefaultTests(SimpleTestCase):
+    """默认值必须是安全的 —— "照文档部署"不该拿到一个能被利用的实例。
+
+    这组断言对应 BUG-05（DEBUG 与固定密钥）和 BUG-24（数据库端口暴露）。
+    """
+
+    def test_debug_defaults_to_off(self):
+        """源码里的默认值（没有环境变量时）必须是 False。
+
+        原版是 ``os.environ.get("DJANGO_DEBUG", "true")``，而 .env.example 又把
+        true 抄了进去 —— 照文档部署的实例会把完整堆栈、绝对路径、DATABASES
+        结构返回给浏览器。这里直接读源码，而不是读已经求值的 settings：测试
+        运行器本身可能设了 DJANGO_DEBUG。
+        """
+        from pathlib import Path
+
+        source = (Path(settings.BASE_DIR) / "config" / "settings.py").read_text(encoding="utf-8")
+        self.assertIn('os.environ.get("DJANGO_DEBUG", "false")', source,
+                      "DEBUG 的默认值又变成 true 了")
+
+    def test_insecure_secret_key_refuses_to_start(self):
+        """非 DEBUG 下用模板里的占位密钥必须直接起不来。
+
+        那个密钥在仓库里公开，拿它签出来的 session cookie 谁都能伪造。
+        """
+        import os
+
+        import config.settings as s
+
+        os.environ.pop("DJANGO_DEBUG", None)
+        os.environ["DJANGO_SECRET_KEY"] = "change-me-in-dev"
+        try:
+            with self.assertRaises(Exception):
+                importlib.reload(s)
+        finally:
+            os.environ.pop("DJANGO_SECRET_KEY", None)
+            importlib.reload(s)
+
+    def test_env_example_has_no_insecure_defaults(self):
+        """模板里不能出现 DEBUG=true、弱口令、缺 CSRF 来源。"""
+        from pathlib import Path
+
+        template = (Path(settings.BASE_DIR).parent / ".env.example").read_text(encoding="utf-8")
+        self.assertNotIn("DJANGO_DEBUG=true", template, ".env.example 又把 DEBUG 打开了")
+        self.assertNotIn("POSTGRES_PASSWORD=app_password", template,
+                         ".env.example 里还是模板弱口令")
+        self.assertIn("CSRF_TRUSTED_ORIGINS", template,
+                      ".env.example 缺 CSRF_TRUSTED_ORIGINS（BUG-23 的根因之一）")
+
+    def test_cookie_hardening(self):
+        self.assertTrue(settings.SESSION_COOKIE_HTTPONLY, "session cookie 必须 HttpOnly")
+        self.assertIn(settings.SESSION_COOKIE_SAMESITE, ("Lax", "Strict"))
+        # SPA 要读 csrftoken 放进 X-CSRFToken 头，所以它不能是 HttpOnly。
+        self.assertFalse(settings.CSRF_COOKIE_HTTPONLY)
+
+    def test_login_throttle_rate_configured(self):
+        self.assertIn("login", settings.REST_FRAMEWORK.get("DEFAULT_THROTTLE_RATES", {}))

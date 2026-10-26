@@ -63,11 +63,31 @@ class Migration(migrations.Migration):
         User = apps.get_model('api', 'WIGOSNodeUser')
         Station = apps.get_model('api', 'Station')
 
+        # 原版在这里写死 create_superuser(password='admin')。演示数据开关打开时
+        # 也绝不能落一个口令已知的超管：它随代码分发，"任何照文档部署的实例都有
+        # 一个 admin/admin 可以登"就是这么来的。
+        #
+        # 现在：优先取 WIGOS_SEED_ADMIN_PASSWORD；没设就当场生成一个随机口令，
+        # 并打印一次（只此一次，之后不再出现在任何地方）。
+        password = os.environ.get("WIGOS_SEED_ADMIN_PASSWORD", "").strip()
+        generated = False
+        if not password:
+            import secrets
+            password = secrets.token_urlsafe(18)
+            generated = True
+
         admin_user = User.objects.create_superuser(
             username=SEED_USERNAME,
-            password='admin',
-            email='wis@wmo.int'
+            password=password,
+            email=os.environ.get("WIGOS_SEED_ADMIN_EMAIL", "wis@wmo.int"),
         )
+        if generated:
+            print(
+                "0011: 已生成演示超管 %s 的随机口令：%s\n"
+                "      这个口令只在这里打印一次，请立即保存。\n"
+                "      想要固定口令请在 .env 里设 WIGOS_SEED_ADMIN_PASSWORD。"
+                % (SEED_USERNAME, password)
+            )
 
         for path in sorted(_TEST_DATA_DIR.glob("*.json")):
             with open(path, 'r', encoding='utf-8') as f:
@@ -84,11 +104,38 @@ class Migration(migrations.Migration):
         Station = apps.get_model('api', 'Station')
         User = apps.get_model('api', 'WIGOSNodeUser')
 
-        # 只回滚这条迁移自己灌的东西：admin 名下的站点 + admin 本人。
-        # 原来的 Station.objects.all().delete() 会把用户后来建的所有站点一起删掉。
+        # 原版是 `Station.objects.all().delete()` —— 注释说"只删本迁移创建的"，
+        # 代码删的是整张表。任何一次 `migrate api 0010`（回退、排障、版本切换
+        # 的常规操作）都会把用户真实录入的数据一起抹掉，且不可恢复。
+        #
+        # 现在只回滚这条迁移自己灌的东西，且只在它当初真的灌过时动手：
+        #   1. 没开 WIGOS_SEED_DEMO → 正向他什么都没做，反向也必须什么都不做；
+        #   2. 只删 owner=admin 且 WSI 出现在 test_data 里的那些站；
+        #   3. 只删 admin 本人（且要求它名下已无站点，避免误删他人的账号）。
+        if not _seeding_enabled(schema_editor.connection):
+            print("0011: 反向迁移 —— 该库未灌过演示数据，不做任何删除。")
+            return
+
+        seeded_wsis = set()
+        if _TEST_DATA_DIR.is_dir():
+            for path in sorted(_TEST_DATA_DIR.glob("*.json")):
+                try:
+                    with open(path, 'r', encoding='utf-8') as f:
+                        seeded_wsis.add(json.load(f).get("id"))
+                except (OSError, ValueError):
+                    continue
+        seeded_wsis.discard(None)
+
         admin = User.objects.filter(username=SEED_USERNAME).first()
-        if admin is not None:
-            Station.objects.filter(owner=admin).delete()
+        if admin is None:
+            return
+
+        removed, _ = Station.objects.filter(
+            owner=admin, wigos_identifier__in=seeded_wsis
+        ).delete()
+        print(f"0011: 反向迁移删除了 {removed} 条演示站点（用户自建数据不动）。")
+
+        if not Station.objects.filter(owner=admin).exists():
             admin.delete()
 
     operations = [

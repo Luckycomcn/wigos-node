@@ -1,3 +1,12 @@
+# 生产形态。原版这里是开发形态：后端 `runserver`、前端跑 Vite dev server、代码目录
+# 用 bind mount 挂进容器。开发形态不能用于交付：
+#   - runserver 单进程、无并发、不适合对外；
+#   - Vite dev server 会把源码和 HMR 通道暴露出去；
+#   - bind mount 让容器内代码随宿主机文件变化，回滚只能靠 git 手工操作。
+# 这里改成：gunicorn 跑 WSGI，前端构建产物交给 nginx。
+#
+# 口令不再有默认值。`${POSTGRES_PASSWORD:?...}` 在未设置时直接报错退出，
+# 比"悄悄用 app_password 起来"安全得多。
 
 services:
   db:
@@ -6,12 +15,14 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-app_db}
       POSTGRES_USER: ${POSTGRES_USER:-app_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app_password}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 未设置，见 .env.example}
       POSTGRES_PORT: ${POSTGRES_PORT:-5432}
     volumes:
       - db_data:/var/lib/postgresql/data
+    # 只绑回环。原版写 "5432:5432" 等于绑 0.0.0.0，把数据库开放给同网段所有人；
+    # 配合模板弱口令，任何人都能直连。运维要从宿主机连库走 ssh 隧道即可。
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app_user} -d ${POSTGRES_DB:-app_db}"]
       interval: 5s
@@ -21,19 +32,14 @@ services:
   backend:
     build: ./backend
     restart: unless-stopped
-    environment:
-      - POSTGRES_DB=${POSTGRES_DB:-app_db}
-      - POSTGRES_USER=${POSTGRES_USER:-app_user}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-app_password}
-      - POSTGRES_HOST=db
-      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
     env_file:
       - .env
-    volumes:
-      - ./backend:/app
-      - ./test_data:/test_data
-    ports:
-      - "8000:8000"
+    environment:
+      - POSTGRES_HOST=db
+    # 不再挂 ./backend:/app —— 镜像里是构建好的代码，容器内容与镜像一致，
+    # 回滚就是换镜像。
+    expose:
+      - "8000"
     depends_on:
       db:
         condition: service_healthy
@@ -41,14 +47,8 @@ services:
   frontend:
     build: ./frontend
     restart: unless-stopped
-    environment:
-      VITE_API_URL: ""
-      VITE_PROXY_TARGET: http://backend:8000
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
     ports:
-      - "5173:5173"
+      - "8080:80"
     depends_on:
       - backend
 

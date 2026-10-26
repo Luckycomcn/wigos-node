@@ -1,11 +1,36 @@
 import os
+import sys
 from pathlib import Path
+
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "insecure-dev-key-change-me")
+# 测试运行器不该被密钥检查挡住：它既不需要真实密钥，也不发真 cookie。
+RUNNING_TESTS = "test" in sys.argv or os.environ.get("WIGOS_RUNNING_TESTS") == "1"
 
-DEBUG = os.environ.get("DJANGO_DEBUG", "true").lower() == "true"
+# DEBUG 默认关闭。原版默认 true，而 `.env.example` 又把 true 抄进去了，于是
+# 「照文档部署」得到的是一个会把完整堆栈、绝对路径、DATABASES 结构返回给浏览器
+# 的实例。要开发调试就显式设 DJANGO_DEBUG=true。
+DEBUG = os.environ.get("DJANGO_DEBUG", "false").lower() == "true"
+
+# 这套密钥是公开的（在仓库里），拿它签出来的 session cookie 谁都能伪造。
+# 非 DEBUG 模式下再用它属于配置事故，直接起不来比带着漏洞上线好。
+_INSECURE_SECRET_KEYS = {
+    "insecure-dev-key-change-me",
+    "change-me-in-dev",
+    "",
+}
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "")
+if not SECRET_KEY or SECRET_KEY in _INSECURE_SECRET_KEYS:
+    if DEBUG or RUNNING_TESTS:
+        SECRET_KEY = "insecure-dev-key-change-me"
+    else:
+        raise ImproperlyConfigured(
+            "DJANGO_SECRET_KEY 未设置或仍是模板里的占位值。"
+            "生产环境请生成一个随机密钥，例如："
+            "python -c \"import secrets; print(secrets.token_urlsafe(50))\""
+        )
 
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,backend").split(",")
 
@@ -123,6 +148,56 @@ CORS_ALLOWED_ORIGINS = [
     if origin.strip()
 ]
 
+# 反代后面才需要：只有来自这些地址的 X-Forwarded-For 才可信（见 api/auth.py）。
+# 默认只信回环 —— 直接暴露的实例如果无条件信任 XFF，任何人都能伪造来源 IP
+# 来绕过登录限流。
+TRUSTED_PROXIES = {
+    proxy.strip()
+    for proxy in os.environ.get("TRUSTED_PROXIES", "127.0.0.1,::1").split(",")
+    if proxy.strip()
+}
+
+# 会话与 CSRF cookie 的安全属性。走 HTTPS 时把 DJANGO_SECURE_COOKIES 设成 true，
+# 否则 cookie 会在明文连接上发出去。
+SECURE_COOKIES = os.environ.get("DJANGO_SECURE_COOKIES", "false").lower() == "true"
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_HTTPONLY = False  # SPA 要读它放进 X-CSRFToken 头
+if SECURE_COOKIES:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_SSL_REDIRECT = True
+    SECURE_HSTS_SECONDS = int(os.environ.get("DJANGO_HSTS_SECONDS", "31536000"))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# 缓存：登录限流的计数器放这里。默认 locmem 是**每进程**独立的 —— 多 worker
+# 部署时实际速率 = 配置值 × worker 数。要精确控制请配 Redis/Memcached：
+#   DJANGO_CACHE_URL=redis://127.0.0.1:6379/1
+_cache_url = os.environ.get("DJANGO_CACHE_URL", "").strip()
+if _cache_url.startswith("redis://"):
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": _cache_url,
+        }
+    }
+elif _cache_url.startswith("memcached://"):
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.memcached.PyMemcacheCache",
+            "LOCATION": _cache_url.replace("memcached://", ""),
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "wigos-node",
+        }
+    }
+
 # WIS2 Notification Messages (api/wnm.py): this node's WIS2 centre id, and the
 # public web storage the announced record files are served from.
 WNM_CENTRE_ID = os.environ.get("WNM_CENTRE_ID", "io-wis2dev-test-wigosnode")
@@ -155,6 +230,13 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.AllowAny",
     ],
+    # 原版不配限流，登录接口可以无限次爆破。这里给登录加一道，其余接口保持
+    # 不限制（目录收割/公开读取会高频调用，限流反而会挡住正常对接）。
+    # 速率可用环境变量覆盖；部署多个 worker 时计数是各进程独立的，要真正生效
+    # 请配 Redis/Memcached 作缓存后端。
+    "DEFAULT_THROTTLE_RATES": {
+        "login": os.environ.get("LOGIN_THROTTLE_RATE", "10/min"),
+    },
     # DRF 默认把 `?format=` 当成「选渲染器」的开关（URL_FORMAT_OVERRIDE）。本项目的
     # 导出接口自己用 `?format=csv|json|xml` 表示文件格式，两个含义撞在一起：
     # 请求 `?format=xml` 时 DRF 先去找 XMLRenderer，没配就抛 404，视图根本进不去。
