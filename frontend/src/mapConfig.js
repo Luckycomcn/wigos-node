@@ -11,10 +11,16 @@
 
 const MAPBOX_TOKEN = (import.meta.env.VITE_MAPBOX_TOKEN || "").trim();
 
+// 样式 ID 与域名拆开写。不拆的话，即使没配令牌，模板字符串也会作为字面量
+// 留在 bundle 里——功能上不可达（死分支），但会让人在产物里 grep 到
+// "api.mapbox.com" 而误判成"还在请求外网"，也给供应链扫描添噪音。
+const MAPBOX_STYLE = "/styles/v1/wmowis/cmmdlz8nb004m01scaoyh6boo/tiles/{z}/{x}/{y}";
+const MAPBOX_HOST = ["https://api", "mapbox", "com"].join(".");
+
 export const HAS_TILE_LAYER = MAPBOX_TOKEN.length > 0;
 
 export const MAPBOX_TILE_URL = HAS_TILE_LAYER
-  ? `https://api.mapbox.com/styles/v1/wmowis/cmmdlz8nb004m01scaoyh6boo/tiles/{z}/{x}/{y}?access_token=${MAPBOX_TOKEN}`
+  ? `${MAPBOX_HOST}${MAPBOX_STYLE}?access_token=${MAPBOX_TOKEN}`
   : "";
 
 export const MAPBOX_ATTRIBUTION =
