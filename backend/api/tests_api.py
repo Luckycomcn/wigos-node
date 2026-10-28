@@ -1,6 +1,4 @@
-import base64
 import copy
-import hashlib
 import json
 
 from django.urls import reverse
@@ -8,7 +6,6 @@ from guardian.shortcuts import assign_perm
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from . import wnm
 from .models import Station, WIGOSNodeGroup, WIGOSNodeUser
 
 
@@ -70,18 +67,17 @@ class StationAPITestCase(APITestCase):
         response = self.client.put(reverse('wmdrv2-wsi', kwargs={'wsi': '0-20000-0-12345'}), {}, format='json')
         self.assertIn(response.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_405_METHOD_NOT_ALLOWED))
 
-    def test_wmdrv2_response_matches_wnm_integrity(self):
-        """The bytes served at a WNM's link hash to its properties.integrity value."""
+    def test_wmdrv2_response_is_compact_whatever_the_accept_header(self):
+        """The record endpoint always serves the same bytes, so a WNM linking
+        to it keeps matching."""
         station = Station.objects.get(wigos_identifier='0-20000-0-123456')
-        message = wnm.create_station_wnm(station)
-        # ask for indentation: the API must answer compact JSON regardless
-        response = self.client.get(reverse('wmdrv2', kwargs={'station_id': station.pk}),
-                                   HTTP_ACCEPT='application/json; indent=4')
+        url = reverse('wmdrv2', kwargs={'station_id': station.pk})
+        plain = self.client.get(url)
+        indented = self.client.get(url, HTTP_ACCEPT='application/json; indent=4')
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        digest = base64.b64encode(hashlib.sha512(response.content).digest()).decode('ascii')
-        self.assertEqual(digest, message['properties']['integrity']['value'])
-        self.assertEqual(len(response.content), message['links'][0]['length'])
+        self.assertEqual(plain.status_code, status.HTTP_200_OK)
+        self.assertEqual(indented.content, plain.content)
+        self.assertNotIn(b'\n', plain.content)
 
 
 with open('/test_data/test_wmdrv2.json') as f:

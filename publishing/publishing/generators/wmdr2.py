@@ -12,7 +12,7 @@ class RecordFileGenerator(MessageGenerator):
         super().__init__(centre_id=centre_id, **options)
         self.centre_id = centre_id
 
-    def generate(self, event):
+    def generate(self, event, deliveries):
         if event.operation == Operation.DELETE:
             return []
         return [

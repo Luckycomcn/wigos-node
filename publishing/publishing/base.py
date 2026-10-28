@@ -2,14 +2,21 @@
 
 A MessageGenerator turns an Event into Messages, a TransportLayer delivers
 them, and a Publisher pairs one of each. Publishers run in their configured
-order for every event.
+order for every event, and each one gets the Deliveries (receipts) of the
+publishers before it.
+
+Byte-level consistency: a storage transport returns the Location of what it
+stored. Before a generator that needs_content() runs, its Publisher
+retrieves every earlier Location and hands over the file actually served, so
+e.g. a WNM's integrity always describes the stored file.
 
 The worker runs events in parallel threads and shares one instance of each
 plugin between them, so plugins must be thread-safe (or keep per-thread
 state themselves)."""
 
+import urllib.request
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import StrEnum
 
@@ -45,6 +52,28 @@ class Message:
     headers: dict = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class Location:
+    """Where a storage transport put a message."""
+
+    url: str  # public link, e.g. a WNM href
+    internal_url: str | None = None  # where this node retrieves it; default url
+
+    @property
+    def retrieve_url(self):
+        return self.internal_url or self.url
+
+
+@dataclass(frozen=True)
+class Delivery:
+    """Receipt of one sent message, handed to the publishers that run later."""
+
+    publisher: str  # name of the publisher that sent it
+    message: Message
+    location: Location | None = None  # storage transports only
+    content: bytes | None = None  # the file retrieved from location, see needs_content()
+
+
 class PublishError(Exception):
     """A message could not be delivered. The worker retries the event later."""
 
@@ -53,10 +82,15 @@ class MessageGenerator(ABC):
     def __init__(self, **options):
         self.options = options
 
+    def needs_content(self, event: Event) -> bool:
+        """True to get the earlier deliveries with `content` filled in."""
+        return False
+
     @abstractmethod
-    def generate(self, event: Event) -> list[Message]:
+    def generate(self, event: Event, deliveries: list[Delivery]) -> list[Message]:
         """Messages for this event; [] if this generator ignores it (e.g. a
-        record file generator on DELETE)."""
+        record file generator on DELETE). `deliveries` are the receipts of
+        the publishers that ran before this one."""
 
 
 class TransportLayer(ABC):
@@ -70,18 +104,21 @@ class TransportLayer(ABC):
         """Disconnect. Called once when the worker stops."""
 
     @abstractmethod
-    def send(self, message: Message) -> None:
-        """Deliver one message; raise PublishError on failure."""
+    def send(self, message: Message) -> Location | None:
+        """Deliver one message and return where it is stored, if anywhere
+        (storage transports); raise PublishError on failure."""
 
-    def send_many(self, messages: list[Message]) -> None:
+    def send_many(self, messages: list[Message]) -> list[Location | None]:
         """Deliver messages in order. Override to send in bulk."""
-        for message in messages:
-            self.send(message)
+        return [self.send(message) for message in messages]
 
 
 class Publisher(ABC):
-    """Pairs a generator with a transport. Subclasses decide which events
-    they publish, and may override publish() for special flows."""
+    """The coordinating instance: pairs a generator with a transport and
+    feeds the generator what it needs. Subclasses decide which events they
+    publish, and may override publish() for special flows."""
+
+    retrieve_timeout = 30  # seconds
 
     def __init__(self, name: str, generator: MessageGenerator, transport: TransportLayer):
         self.name = name
@@ -98,10 +135,27 @@ class Publisher(ABC):
     def close(self):
         self.transport.close()
 
-    def publish(self, event: Event) -> None:
+    def retrieve(self, location: Location) -> bytes:
+        """The file served at the location's internal URL."""
+        try:
+            with urllib.request.urlopen(location.retrieve_url, timeout=self.retrieve_timeout) as response:
+                return response.read()
+        except (OSError, ValueError) as e:  # URLError and HTTPError are OSErrors
+            raise PublishError(f"Could not retrieve {location.retrieve_url}: {e}") from e
+
+    def publish(self, event: Event, deliveries: list[Delivery]) -> list[Delivery]:
+        """Run the generator and the transport; returns this publisher's
+        deliveries for the publishers after it."""
         if not self.should_publish(event):
-            return
-        self.transport.send_many(self.generator.generate(event))
+            return []
+        if self.generator.needs_content(event):
+            deliveries = [
+                replace(d, content=self.retrieve(d.location)) if d.location else d
+                for d in deliveries
+            ]
+        messages = self.generator.generate(event, deliveries)
+        locations = self.transport.send_many(messages)
+        return [Delivery(self.name, m, location) for m, location in zip(messages, locations)]
 
 
 class DefaultPublisher(Publisher):

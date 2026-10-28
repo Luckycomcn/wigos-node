@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from publishing.base import Message, Operation
+from publishing.base import Location, Message, Operation
 from publishing.generators.wmdr2 import RecordFileGenerator
 from publishing.registry import ConfigurationError, build_publishers
 from publishing.transports.log import LogTransport
@@ -54,13 +54,13 @@ class RecordFileGeneratorTestCase(unittest.TestCase):
 
     def test_create_and_update_give_the_record_file(self):
         for operation in (Operation.CREATE, Operation.UPDATE):
-            [message] = self.generator.generate(make_event(operation, wmdrv2=RECORD))
+            [message] = self.generator.generate(make_event(operation, wmdrv2=RECORD), [])
             self.assertEqual(message.body, render_record(RECORD))
             self.assertEqual(message.media_type, "application/geo+json")
             self.assertEqual(message.name, "wmdr2_io-test_0-20000-0-12345_2026-08-21T16_29_00_000.json")
 
     def test_delete_gives_nothing(self):
-        self.assertEqual(self.generator.generate(make_event(Operation.DELETE, wmdrv2=RECORD)), [])
+        self.assertEqual(self.generator.generate(make_event(Operation.DELETE, wmdrv2=RECORD), []), [])
 
     def test_centre_id_is_required_in_config(self):
         with self.assertRaises(ConfigurationError) as caught:
@@ -87,3 +87,11 @@ class LogTransportTestCase(unittest.TestCase):
             transport.send(Message(body=b"abcdef", media_type="text/plain", topic="own"))
         self.assertIn("topic=own", logs.output[0])
         self.assertTrue(logs.output[0].endswith("size=6 abc..."))
+
+    def test_reports_a_location_only_with_url_and_name(self):
+        message = Message(body=b"{}", media_type="application/json", name="a b.json")
+        with self.assertLogs("publishing", "INFO"):
+            self.assertIsNone(LogTransport().send(message))
+            self.assertIsNone(LogTransport(url="https://pub/").send(Message(b"{}", "application/json")))
+            location = LogTransport(url="https://pub/", internal_url="http://int").send(message)
+        self.assertEqual(location, Location("https://pub/a%20b.json", "http://int/a%20b.json"))

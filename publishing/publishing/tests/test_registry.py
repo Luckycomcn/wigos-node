@@ -37,7 +37,7 @@ class BuildPublishersTestCase(unittest.TestCase):
 
     def test_built_publisher_publishes(self):
         [publisher] = build_publishers([config()])
-        publisher.publish(make_event())
+        publisher.publish(make_event(), [])
         self.assertEqual([m.body for m in publisher.transport.sent], [b"create"])
 
     def test_empty_config_builds_nothing(self):
