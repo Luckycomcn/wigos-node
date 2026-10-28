@@ -19,7 +19,10 @@ services:
       retries: 10
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      additional_contexts:
+        publishing: ./publishing
     restart: unless-stopped
     environment:
       - POSTGRES_DB=${POSTGRES_DB:-app_db}
@@ -31,6 +34,7 @@ services:
       - .env
     volumes:
       - ./backend:/app
+      - ./publishing:/publishing
       - ./test_data:/test_data
     ports:
       - "8000:8000"
