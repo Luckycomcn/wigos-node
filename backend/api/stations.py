@@ -8,7 +8,7 @@ import logging
 from functools import cache
 from pathlib import Path
 
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from guardian.shortcuts import assign_perm, get_objects_for_user
 from jsonschema import Draft202012Validator
 
@@ -130,7 +130,10 @@ def _mark_changed_by(station, user):
 
 def _save(station):
     try:
-        station.save()
+        # one transaction with whatever the save signals write (the outbox
+        # event), also outside the batch endpoint's transaction
+        with transaction.atomic():
+            station.save()
     except ValueError as e:
         raise StationError(str(e)) from e
     except IntegrityError as e:

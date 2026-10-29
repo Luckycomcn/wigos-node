@@ -6,7 +6,7 @@ from guardian.shortcuts import assign_perm
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from django.db.models.signals import post_save
+from django.db.models.signals import pre_save
 
 from . import stations
 from .models import Station, WIGOSNodeGroup, WIGOSNodeUser
@@ -113,8 +113,9 @@ class ChangedByTestCase(APITestCase):
         def receiver(sender, instance, **kwargs):
             seen.append((instance._source, instance._changed_by))
 
-        post_save.connect(receiver, sender=Station)
-        self.addCleanup(post_save.disconnect, receiver, sender=Station)
+        # pre_save: post_save receivers (the outbox) consume the markers
+        pre_save.connect(receiver, sender=Station)
+        self.addCleanup(pre_save.disconnect, receiver, sender=Station)
         action()
         return seen
 

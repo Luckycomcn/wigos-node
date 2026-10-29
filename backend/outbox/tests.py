@@ -1,6 +1,12 @@
-from django.test import SimpleTestCase, TestCase, override_settings
+import copy
+import json
 
-from api.models import WIGOSNodeUser
+from django.test import SimpleTestCase, TestCase, override_settings
+from django.urls import reverse
+from rest_framework.test import APITestCase
+
+from api import stations
+from api.models import Station, WIGOSNodeGroup, WIGOSNodeUser
 from publishing.base import Event, Operation
 from publishing.generators.wmdr2 import RecordFileGenerator
 from publishing.generators.wnm import WNMGenerator
@@ -68,6 +74,113 @@ class PublicationEventTestCase(TestCase):
 
         self.assertQuerySetEqual(PublicationEvent.objects.filter(issuers__overlap=["756", "999"]), [swiss, moved])
         self.assertQuerySetEqual(PublicationEvent.objects.filter(ordering_keys__overlap=["wsi:0-756-0-a"]), [swiss, moved])
+
+
+with open("/test_data/test_wmdrv2.json") as f:
+    BASE_RECORD = json.load(f)
+
+
+def record(wsi, title="Outbox station"):
+    data = copy.deepcopy(BASE_RECORD)
+    data["id"] = wsi
+    data["properties"]["title"] = title
+    return data
+
+
+class QueueOnStationChangeTestCase(APITestCase):
+    """Every committed station change leaves exactly one event; nothing that
+    is rolled back does."""
+
+    def setUp(self):
+        # issuer groups seeded by api migration 0004
+        self.member = WIGOSNodeUser.objects.create_user(username="ob_member", email="ob_member@example.com", password="pw")
+        self.member.groups.add(WIGOSNodeGroup.objects.get(issuer_identifier=756).group)
+        self.admin = WIGOSNodeUser.objects.create_superuser(username="ob_admin", email="ob_admin@example.com", password="pw")
+        PublicationEvent.objects.all().delete()
+
+    def events(self):
+        return list(PublicationEvent.objects.order_by("id"))
+
+    def test_create_queues_one_event(self):
+        station = stations.create_station(self.member, record("0-756-0-ob1"))
+
+        [event] = self.events()
+        self.assertEqual(event.operation, Operation.CREATE)
+        self.assertEqual(event.station_id, station.pk)
+        self.assertEqual(event.wigos_identifier, "0-756-0-ob1")
+        self.assertEqual(event.wmdrv2, station.wmdrv2)
+        self.assertIsNone(event.previous_wmdrv2)
+        self.assertEqual((event.source, event.changed_by), ("api", self.member))
+        self.assertEqual(event.issuers, ["756"])
+        self.assertEqual(event.ordering_keys, [f"station:{station.pk}", "wsi:0-756-0-ob1"])
+        self.assertEqual(event.status, PublicationEvent.Status.PENDING)
+
+    def test_update_keeps_the_previous_record(self):
+        station = stations.create_station(self.member, record("0-756-0-ob2", "Old"))
+        stations.update_station(self.member, station, record("0-756-0-ob2", "New"))
+
+        create, update = self.events()
+        self.assertEqual(update.operation, Operation.UPDATE)
+        self.assertEqual(update.previous_wmdrv2["properties"]["title"], "Old")
+        self.assertEqual(update.wmdrv2["properties"]["title"], "New")
+
+    def test_wsi_moving_issuer_keys_both(self):
+        station = stations.create_station(self.admin, record("0-756-0-ob3"))
+        stations.update_station(self.admin, station, record("0-76-0-ob3"))
+
+        update = self.events()[-1]
+        self.assertEqual((update.source, update.changed_by), ("admin", None))
+        self.assertEqual(update.wigos_identifier, "0-76-0-ob3")
+        self.assertEqual(update.issuers, ["756", "76"])
+        self.assertEqual(update.ordering_keys, [f"station:{station.pk}", "wsi:0-756-0-ob3", "wsi:0-76-0-ob3"])
+
+    def test_delete_queues_a_deletion_that_outlives_the_station(self):
+        station = stations.create_station(self.member, record("0-756-0-ob4"))
+        pk = station.pk
+        station.delete()
+
+        deletion = self.events()[-1]
+        self.assertEqual(deletion.operation, Operation.DELETE)
+        self.assertEqual(deletion.station_id, pk)
+        self.assertEqual(deletion.source, "system")
+        self.assertFalse(Station.objects.filter(pk=pk).exists())
+
+    def test_attribution_is_not_carried_to_a_later_save(self):
+        station = stations.create_station(self.member, record("0-756-0-ob5"))
+        station.save()  # e.g. a script, without stations.update_station
+        self.assertEqual([(e.source, e.changed_by) for e in self.events()], [("api", self.member), ("system", None)])
+
+    def test_rejected_save_queues_nothing(self):
+        stations.create_station(self.member, record("0-756-0-ob6"))
+        with self.assertRaises(stations.StationError):
+            stations.create_station(self.member, record("0-756-0-ob6"))  # WSI taken
+        self.assertEqual(len(self.events()), 1)
+
+    def post_batch(self, updates, dry_run=False):
+        self.client.force_authenticate(self.member)
+        return self.client.post(reverse("wmdrv2-batch"), {"dry_run": dry_run, "updates": updates}, format="json")
+
+    def test_batch_dry_run_queues_nothing(self):
+        station = stations.create_station(self.member, record("0-756-0-ob7"))
+        PublicationEvent.objects.all().delete()
+
+        response = self.post_batch([{"station_id": station.pk, "wmdrv2": record("0-756-0-ob7", "New")}], dry_run=True)
+
+        self.assertEqual(response.json()["summary"], {"ok": 1, "error": 0})
+        self.assertEqual(self.events(), [])
+
+    def test_batch_queues_only_the_accepted_updates(self):
+        ok = stations.create_station(self.member, record("0-756-0-ob8"))
+        other = stations.create_station(self.member, record("0-756-0-ob9"))
+        PublicationEvent.objects.all().delete()
+
+        response = self.post_batch([
+            {"station_id": ok.pk, "wmdrv2": record("0-756-0-ob8", "New")},
+            {"station_id": other.pk, "wmdrv2": record("0-756-0-ob8", "Clash")},  # WSI of the first station
+        ])
+
+        self.assertEqual(response.json()["summary"], {"ok": 1, "error": 1})
+        self.assertEqual([(e.station_id, e.operation) for e in self.events()], [(ok.pk, Operation.UPDATE)])
 
 
 LOG = "publishing.transports.log.LogTransport"

@@ -10,4 +10,4 @@ class OutboxConfig(AppConfig):
     name = "outbox"
 
     def ready(self):
-        from . import checks, publishers  # noqa: F401 (registers the check and the cache reset)
+        from . import checks, publishers, signals  # noqa: F401 (registers the check, cache reset and receivers)

@@ -38,3 +38,6 @@ class LogTransport(TransportLayer):
             internal_url = f"{self.internal_url.rstrip('/')}/{name}" if self.internal_url else None
             return Location(f"{self.url.rstrip('/')}/{name}", internal_url)
         return None
+
+    def remove(self, location):
+        logger.info("remove url=%s", location.url)

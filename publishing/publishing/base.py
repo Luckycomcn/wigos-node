@@ -106,7 +106,16 @@ class TransportLayer(ABC):
     @abstractmethod
     def send(self, message: Message) -> Location | None:
         """Deliver one message and return where it is stored, if anywhere
-        (storage transports); raise PublishError on failure."""
+        (storage transports); raise PublishError on failure.
+
+        All or nothing: either the message is delivered completely, or
+        nothing is left behind (e.g. write a temp file, then rename). A
+        transport that can't promise this removes its partial output before
+        raising."""
+
+    def remove(self, location: Location) -> None:
+        """Remove what send() stored at `location`, when a failed event is
+        undone. Default: nothing to remove (e.g. notification transports)."""
 
     def send_many(self, messages: list[Message]) -> list[Location | None]:
         """Deliver messages in order. Override to send in bulk."""
@@ -156,6 +165,14 @@ class Publisher(ABC):
         messages = self.generator.generate(event, deliveries)
         locations = self.transport.send_many(messages)
         return [Delivery(self.name, m, location) for m, location in zip(messages, locations)]
+
+    def undo(self, event: Event, deliveries: list[Delivery]) -> None:
+        """Remove what this publisher stored for an event that gave up.
+        `deliveries` are all of the event's receipts; only this publisher's
+        are touched, newest first. Errors are left to the caller to record."""
+        for delivery in reversed(deliveries):
+            if delivery.publisher == self.name and delivery.location:
+                self.transport.remove(delivery.location)
 
 
 class DefaultPublisher(Publisher):

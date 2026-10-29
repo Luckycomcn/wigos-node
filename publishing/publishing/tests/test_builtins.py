@@ -95,3 +95,8 @@ class LogTransportTestCase(unittest.TestCase):
             self.assertIsNone(LogTransport(url="https://pub/").send(Message(b"{}", "application/json")))
             location = LogTransport(url="https://pub/", internal_url="http://int").send(message)
         self.assertEqual(location, Location("https://pub/a%20b.json", "http://int/a%20b.json"))
+
+    def test_remove_logs(self):
+        with self.assertLogs("publishing", "INFO") as logs:
+            LogTransport().remove(Location("https://pub/f.json"))
+        self.assertIn("remove url=https://pub/f.json", logs.output[0])

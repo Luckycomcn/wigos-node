@@ -74,6 +74,9 @@ class RecordingTransport(TransportLayer):
             return Location(f"{self.options['url']}/{message.name}")
         return None
 
+    def remove(self, location):
+        self.removed = getattr(self, "removed", []) + [location.url]
+
 
 class CreatesOnlyPublisher(Publisher):
     def should_publish(self, event):
@@ -176,6 +179,35 @@ class DeliveryTestCase(unittest.TestCase):
             self.assertEqual(Location("u").retrieve_url, "u")
             publisher = DefaultPublisher("check", ContentGenerator(), RecordingTransport())
             self.assertEqual(publisher.retrieve(location), b'{"stored":true}')
+
+    def test_undo_removes_only_this_publishers_stored_deliveries_newest_first(self):
+        transport = RecordingTransport()
+        publisher = DefaultPublisher("files", EchoGenerator(), transport)
+        body = Message(b"x", "text/plain")
+        publisher.undo(make_event(), [
+            Delivery("files", body, Location("http://store/a")),
+            Delivery("other", body, Location("http://store/other")),
+            Delivery("files", body),  # nothing stored
+            Delivery("files", body, Location("http://store/b")),
+        ])
+        self.assertEqual(transport.removed, ["http://store/b", "http://store/a"])
+
+    def test_default_remove_does_nothing(self):
+        class NotificationTransport(TransportLayer):
+            def send(self, message):
+                return None
+
+        publisher = DefaultPublisher("note", EchoGenerator(), NotificationTransport())
+        publisher.undo(make_event(), [Delivery("note", Message(b"x", "text/plain"), Location("http://x"))])
+
+    def test_undo_errors_reach_the_caller(self):
+        class BrokenRemove(RecordingTransport):
+            def remove(self, location):
+                raise PublishError("storage down")
+
+        publisher = DefaultPublisher("files", EchoGenerator(), BrokenRemove())
+        with self.assertRaises(PublishError):
+            publisher.undo(make_event(), [Delivery("files", Message(b"x", "text/plain"), Location("http://x"))])
 
     def test_failed_retrieval_raises_publish_error(self):
         publisher = DefaultPublisher("check", ContentGenerator(), RecordingTransport())
