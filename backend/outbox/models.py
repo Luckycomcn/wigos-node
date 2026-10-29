@@ -13,9 +13,10 @@ class PublicationEvent(models.Model):
 
     class Status(models.TextChoices):
         PENDING = "pending"
-        PROCESSING = "processing"
-        DONE = "done"
-        FAILED = "failed"
+        PROCESSING = "processing"  # claimed by a worker
+        PROCESSED = "processed"  # every publisher ran (our broker accepted the WNM)
+        FAILED = "failed"  # gave up after the last attempt
+        PUBLISHED = "published"  # the WNM came back from upstream (MQTT listener)
 
     class Source(models.TextChoices):
         API = "api", "API"  # a regular user, through the API

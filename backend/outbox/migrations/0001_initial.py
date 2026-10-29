@@ -28,7 +28,7 @@ class Migration(migrations.Migration):
                 ('source', models.CharField(choices=[('api', 'API'), ('admin', 'Administrator'), ('system', 'System')], default='system', max_length=6)),
                 ('issuers', django.contrib.postgres.fields.ArrayField(base_field=models.CharField(max_length=255), blank=True, default=list, size=None)),
                 ('ordering_keys', django.contrib.postgres.fields.ArrayField(base_field=models.CharField(max_length=300), blank=True, default=list, size=None)),
-                ('status', models.CharField(choices=[('pending', 'Pending'), ('processing', 'Processing'), ('done', 'Done'), ('failed', 'Failed')], default='pending', max_length=10)),
+                ('status', models.CharField(choices=[('pending', 'Pending'), ('processing', 'Processing'), ('processed', 'Processed'), ('failed', 'Failed'), ('published', 'Published')], default='pending', max_length=10)),
                 ('locked_until', models.DateTimeField(blank=True, null=True)),
                 ('completed', django.contrib.postgres.fields.ArrayField(base_field=models.CharField(max_length=255), blank=True, default=list, size=None)),
                 ('deliveries', models.JSONField(blank=True, default=list)),

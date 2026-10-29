@@ -8,3 +8,6 @@ class OutboxConfig(AppConfig):
 
     default_auto_field = "django.db.models.BigAutoField"
     name = "outbox"
+
+    def ready(self):
+        from . import checks, publishers  # noqa: F401 (registers the check and the cache reset)

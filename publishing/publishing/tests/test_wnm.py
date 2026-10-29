@@ -124,6 +124,14 @@ class WNMGeneratorTestCase(unittest.TestCase):
         with self.assertRaises(PublishError):
             self.generate(Operation.CREATE, [])
 
+    def test_skip_missing_logs_and_sends_nothing(self):
+        self.generator = WNMGenerator(centre_id="io-test", skip_missing=True)
+        with self.assertLogs("publishing", "WARNING") as logs:
+            self.assertEqual(self.generate(Operation.UPDATE, []), [])
+        self.assertIn("No stored application/geo+json file", logs.output[0])
+        # with a stored file it announces as usual
+        self.assertEqual(len(self.generate(Operation.UPDATE, [self.stored])), 1)
+
     def test_deletion_needs_no_content(self):
         self.assertTrue(self.generator.needs_content(make_event(Operation.UPDATE)))
         self.assertFalse(self.generator.needs_content(make_event(Operation.DELETE)))

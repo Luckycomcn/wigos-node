@@ -10,6 +10,7 @@ retrieved from storage, never a second rendering of the record."""
 import base64
 import hashlib
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -30,6 +31,8 @@ LINK_RELATIONS = {
 
 # Data larger than this must not be embedded via properties.content (Req 11A)
 MAX_INLINE_CONTENT_SIZE = 4096
+
+logger = logging.getLogger("publishing")
 
 
 def _rfc3339_utc(value):
@@ -98,13 +101,17 @@ def create_wnm(wmdrv2, operation, href, centre_id, content=None, media_type=WMDR
 class WNMGenerator(MessageGenerator):
     """One WNM per stored record file among the earlier deliveries.
 
-    Options: centre_id (this node's WIS2 centre id, part of data_id) and
-    media_type (of the stored files to announce, default WMDR2)."""
+    Options: centre_id (this node's WIS2 centre id, part of data_id),
+    media_type (of the stored files to announce, default WMDR2) and
+    skip_missing (default False: a create/update with no stored file raises
+    PublishError; True logs a warning and announces nothing, for setups
+    whose storage gives no links yet)."""
 
-    def __init__(self, *, centre_id, media_type=WMDR2_MEDIA_TYPE, **options):
-        super().__init__(centre_id=centre_id, media_type=media_type, **options)
+    def __init__(self, *, centre_id, media_type=WMDR2_MEDIA_TYPE, skip_missing=False, **options):
+        super().__init__(centre_id=centre_id, media_type=media_type, skip_missing=skip_missing, **options)
         self.centre_id = centre_id
         self.media_type = media_type
+        self.skip_missing = skip_missing
 
     def needs_content(self, event):
         # a deletion carries no integrity, and the file may be gone
@@ -115,7 +122,11 @@ class WNMGenerator(MessageGenerator):
         if not files:
             if event.operation == Operation.DELETE:
                 return []  # nothing was announced, so nothing to retract
-            raise PublishError(f"No stored {self.media_type} file to announce for event {event.id}")
+            problem = f"No stored {self.media_type} file to announce for event {event.id}"
+            if self.skip_missing:
+                logger.warning("%s; no WNM sent (skip_missing)", problem)
+                return []
+            raise PublishError(problem)
         return [
             Message(
                 body=json.dumps(

@@ -1,9 +1,14 @@
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase, override_settings
 
 from api.models import WIGOSNodeUser
 from publishing.base import Event, Operation
+from publishing.generators.wmdr2 import RecordFileGenerator
+from publishing.generators.wnm import WNMGenerator
+from publishing.registry import ConfigurationError
 
+from .checks import check_publishers
 from .models import PublicationEvent
+from .publishers import get_publishers
 
 RECORD = {"id": "0-756-0-outbox", "properties": {"updated": "2026-10-29T09:00:00Z"}}
 
@@ -63,3 +68,48 @@ class PublicationEventTestCase(TestCase):
 
         self.assertQuerySetEqual(PublicationEvent.objects.filter(issuers__overlap=["756", "999"]), [swiss, moved])
         self.assertQuerySetEqual(PublicationEvent.objects.filter(ordering_keys__overlap=["wsi:0-756-0-a"]), [swiss, moved])
+
+
+LOG = "publishing.transports.log.LogTransport"
+BROKEN = [
+    {"NAME": "files", "GENERATOR": {"CLASS": "publishing.generators.wmdr2.RecordFileGenerator"}, "TRANSPORT": {"CLASS": LOG}},
+    {"NAME": "files", "GENERATOR": {"CLASS": "nowhere.Generator"}, "TRANSPORT": {"CLASS": LOG}},
+]
+
+
+class PublishersSettingTestCase(SimpleTestCase):
+    def test_configured_publishers_build(self):
+        self.assertEqual(check_publishers(None), [])
+        storage, wnm = get_publishers()
+        self.assertEqual((storage.name, wnm.name), ("wis2-storage", "wis2-wnm"))
+        self.assertIsInstance(storage.generator, RecordFileGenerator)
+        self.assertIsInstance(wnm.generator, WNMGenerator)
+
+    def test_publishers_are_built_once(self):
+        self.assertIs(get_publishers()[0], get_publishers()[0])
+
+    @override_settings(PUBLISHERS=BROKEN)
+    def test_check_reports_every_problem(self):
+        errors = check_publishers(None)
+        self.assertEqual([e.id for e in errors], ["outbox.E001", "outbox.E001"])
+        self.assertIn("centre_id", errors[0].msg)
+        self.assertIn("NAME is used more than once", errors[1].msg)
+        with self.assertRaises(ConfigurationError):
+            get_publishers()
+
+    def test_changed_setting_rebuilds(self):
+        default = get_publishers()
+        with override_settings(PUBLISHERS=[]):
+            self.assertEqual(get_publishers(), [])
+        self.assertEqual([p.name for p in get_publishers()], [p.name for p in default])
+
+    @override_settings()
+    def test_missing_setting_means_no_publishers(self):
+        from django.conf import settings
+
+        del settings.PUBLISHERS
+        # deleting a setting sends no setting_changed, so reset by hand
+        get_publishers.cache_clear()
+        self.addCleanup(get_publishers.cache_clear)
+        self.assertEqual(check_publishers(None), [])
+        self.assertEqual(get_publishers(), [])
