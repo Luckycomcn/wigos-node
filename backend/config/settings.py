@@ -11,6 +11,7 @@ ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,back
 
 INSTALLED_APPS = [
     "api.apps.ApiConfig",
+    "outbox.apps.OutboxConfig",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
