@@ -30,7 +30,10 @@ services:
       retries: 10
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      additional_contexts:
+        publishing: ./publishing
     restart: unless-stopped
     env_file:
       - .env

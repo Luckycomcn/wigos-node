@@ -20,6 +20,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 RUN chmod +x entrypoint.sh
 
+# The publishing plugins live outside backend/ (repo-root publishing/), passed
+# in as the "publishing" build context by docker-compose.yml.
+COPY --from=publishing . /publishing
+ENV PYTHONPATH=/publishing
+
 EXPOSE 8000
 
 ENTRYPOINT ["./entrypoint.sh"]

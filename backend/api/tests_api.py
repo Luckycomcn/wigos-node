@@ -1,6 +1,4 @@
-import base64
 import copy
-import hashlib
 import json
 
 from django.urls import reverse
@@ -8,7 +6,9 @@ from guardian.shortcuts import assign_perm
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from . import wnm
+from django.db.models.signals import pre_save
+
+from . import stations
 from .models import Station, WIGOSNodeGroup, WIGOSNodeUser
 from .testing_utils import load_test_json
 
@@ -84,18 +84,17 @@ class StationAPITestCase(APITestCase):
         response = self.client.put(reverse('wmdrv2-wsi', kwargs={'wsi': '0-20000-0-12345'}), {}, format='json')
         self.assertIn(response.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_405_METHOD_NOT_ALLOWED))
 
-    def test_wmdrv2_response_matches_wnm_integrity(self):
-        """The bytes served at a WNM's link hash to its properties.integrity value."""
+    def test_wmdrv2_response_is_compact_whatever_the_accept_header(self):
+        """The record endpoint always serves the same bytes, so a WNM linking
+        to it keeps matching."""
         station = Station.objects.get(wigos_identifier='0-20000-0-123456')
-        message = wnm.create_station_wnm(station)
-        # ask for indentation: the API must answer compact JSON regardless
-        response = self.client.get(reverse('wmdrv2', kwargs={'station_id': station.pk}),
-                                   HTTP_ACCEPT='application/json; indent=4')
+        url = reverse('wmdrv2', kwargs={'station_id': station.pk})
+        plain = self.client.get(url)
+        indented = self.client.get(url, HTTP_ACCEPT='application/json; indent=4')
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        digest = base64.b64encode(hashlib.sha512(response.content).digest()).decode('ascii')
-        self.assertEqual(digest, message['properties']['integrity']['value'])
-        self.assertEqual(len(response.content), message['links'][0]['length'])
+        self.assertEqual(plain.status_code, status.HTTP_200_OK)
+        self.assertEqual(indented.content, plain.content)
+        self.assertNotIn(b'\n', plain.content)
 
 
 BASE_RECORD = load_test_json('test_wmdrv2.json')
@@ -110,6 +109,44 @@ def record(wsi, title="Batch station"):
     data['id'] = wsi
     data['properties']['title'] = title
     return data
+
+
+class ChangedByTestCase(APITestCase):
+    """create_station/update_station tell the save signals who changed the
+    station (read by the outbox)."""
+
+    def setUp(self):
+        self.member = WIGOSNodeUser.objects.create_user(username='cb_member', email='cb_member@example.com', password='pw')
+        self.member.groups.add(WIGOSNodeGroup.objects.get(issuer_identifier=ISSUER_A).group)
+        self.admin = WIGOSNodeUser.objects.create_superuser(username='cb_admin', email='cb_admin@example.com', password='pw')
+
+    def saved_markers(self, action):
+        seen = []
+
+        def receiver(sender, instance, **kwargs):
+            seen.append((instance._source, instance._changed_by))
+
+        # pre_save: post_save receivers (the outbox) consume the markers
+        pre_save.connect(receiver, sender=Station)
+        self.addCleanup(pre_save.disconnect, receiver, sender=Station)
+        action()
+        return seen
+
+    def test_regular_user_is_named(self):
+        seen = self.saved_markers(lambda: stations.create_station(self.member, record(f'0-{ISSUER_A}-0-cb1')))
+        self.assertEqual(seen, [('api', self.member)])
+
+        station = Station.objects.get(wigos_identifier=f'0-{ISSUER_A}-0-cb1')
+        seen = self.saved_markers(lambda: stations.update_station(self.member, station, record(f'0-{ISSUER_A}-0-cb1', 'New')))
+        self.assertEqual(seen, [('api', self.member)])
+
+    def test_superuser_is_marked_admin_without_a_name(self):
+        seen = self.saved_markers(lambda: stations.create_station(self.admin, record(f'0-{ISSUER_A}-0-cb2')))
+        self.assertEqual(seen, [('admin', None)])
+
+        station = Station.objects.get(wigos_identifier=f'0-{ISSUER_A}-0-cb2')
+        seen = self.saved_markers(lambda: stations.update_station(self.admin, station, record(f'0-{ISSUER_A}-0-cb2', 'New')))
+        self.assertEqual(seen, [('admin', None)])
 
 
 class BatchAPITestCase(APITestCase):

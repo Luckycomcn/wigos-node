@@ -261,7 +261,7 @@ def _error_response(error):
 
 class Wmdrv2View(APIView):
     permission_classes = [IsAuthenticated | ReadOnly]
-    # GET serves the bytes WNM integrity hashes are computed over (api/wnm.py)
+    # GET serves the same bytes for every client (see renderers.py)
     renderer_classes = [CompactJSONRenderer]
 
     def get(self, request, station_id=None):
