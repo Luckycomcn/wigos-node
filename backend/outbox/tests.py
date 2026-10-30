@@ -5,9 +5,11 @@ import json
 import threading
 import time
 from datetime import timedelta
+from functools import partial
 from unittest import mock
 
 from django.core.management import call_command
+from django.db import transaction
 from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -199,6 +201,26 @@ class QueueOnStationChangeTestCase(APITestCase):
 
         self.assertEqual(response.json()["summary"], {"ok": 1, "error": 1})
         self.assertEqual([(e.station_id, e.operation) for e in self.events()], [(ok.pk, Operation.UPDATE)])
+
+    def test_each_committed_change_wakes_the_worker(self):
+        with self.captureOnCommitCallbacks(execute=True) as callbacks:
+            stations.create_station(self.member, record("0-756-0-ob10"))
+        self.assertEqual(len(callbacks), 1)
+
+    def test_rolled_back_changes_wake_nobody(self):
+        ok = stations.create_station(self.member, record("0-756-0-ob11"))
+        other = stations.create_station(self.member, record("0-756-0-ob12"))
+
+        with self.captureOnCommitCallbacks() as callbacks:
+            self.post_batch([{"station_id": ok.pk, "wmdrv2": record("0-756-0-ob11", "New")}], dry_run=True)
+        self.assertEqual(callbacks, [])
+
+        with self.captureOnCommitCallbacks() as callbacks:
+            self.post_batch([
+                {"station_id": ok.pk, "wmdrv2": record("0-756-0-ob11", "New")},
+                {"station_id": other.pk, "wmdrv2": record("0-756-0-ob11", "Clash")},
+            ])
+        self.assertEqual(len(callbacks), 1)
 
 
 LOG = "publishing.transports.log.LogTransport"
@@ -631,3 +653,71 @@ class ParallelWorkerTestCase(TransactionTestCase):
             call_command("run_publishers", "--once")
 
         self.assertEqual(self.statuses(), {PublicationEvent.Status.PROCESSED})
+
+
+def queue_and_notify(fail=False):
+    """A committed (or rolled back) event, notified like the signal does."""
+    with transaction.atomic():
+        row = make_row(ordering_keys=["station:1"])
+        transaction.on_commit(partial(worker.notify, row.pk))
+        if fail:
+            raise RuntimeError("rolled back")
+    return row
+
+
+@mock.patch.object(worker, "POLL_INTERVAL", 300)  # only notifications wake
+class NotifyTestCase(TransactionTestCase):
+    """LISTEN needs committed notifications, so no TestCase here either."""
+
+    def start(self, target, *args, **kwargs):
+        stop, ready = threading.Event(), threading.Event()
+        thread = threading.Thread(target=target, args=args, kwargs={**kwargs, "stop": stop, "ready": ready})
+        thread.start()
+
+        def finish():
+            stop.set()
+            thread.join(10)
+            self.assertFalse(thread.is_alive())
+
+        self.addCleanup(finish)
+        self.assertTrue(ready.wait(5))
+        return finish
+
+    def listening(self):
+        wakeup = worker.Wakeup()
+        self.start(lambda stop, ready: worker.listen(wakeup, stop, ready))
+        return wakeup
+
+    def test_a_committed_event_wakes_the_listener(self):
+        wakeup = self.listening()
+        seen = wakeup.current()
+        queue_and_notify()
+        self.assertTrue(wakeup.wait(seen, timeout=5))
+
+    def test_a_rolled_back_event_wakes_nobody(self):
+        wakeup = self.listening()
+        seen = wakeup.current()
+        with self.assertRaises(RuntimeError):
+            queue_and_notify(fail=True)
+        self.assertFalse(wakeup.wait(seen, timeout=2))
+
+    def test_the_poll_wakes_the_listener_without_notifications(self):
+        wakeup = self.listening()
+        seen = wakeup.current()
+        with mock.patch.object(worker, "POLL_INTERVAL", 1):
+            self.assertTrue(wakeup.wait(seen, timeout=5))
+
+    def test_the_running_worker_publishes_a_change_right_away(self):
+        transport = OverlapTransport()
+        finish = self.start(worker.run, [DefaultPublisher("slow", EventIdGenerator(), transport)], workers=2)
+
+        row = queue_and_notify()
+        for _ in range(50):
+            row.refresh_from_db()
+            if row.status == PublicationEvent.Status.PROCESSED:
+                break
+            time.sleep(0.1)
+
+        self.assertEqual(row.status, PublicationEvent.Status.PROCESSED)
+        finish()  # stops: the threads end, the transports are closed
+        self.assertEqual((transport.opened, transport.closed), (1, 1))

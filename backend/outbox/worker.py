@@ -1,5 +1,8 @@
 """Run queued PublicationEvents through the configured publishers.
 
+The worker sleeps until a committed change NOTIFYs it (see signals.py), with
+a poll every POLL_INTERVAL as a fallback.
+
 Events are processed in parallel threads (settings.PUBLISHING_WORKERS),
 oldest first. An event waits while an older event that still holds its
 resources shares one of its ordering keys (same station, or a WIGOS
@@ -21,12 +24,14 @@ compares comes from the database clock, so workers on hosts whose clocks
 differ still agree on when a lease expires."""
 
 import logging
+import select
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
 from django.conf import settings
-from django.db import close_old_connections, connection, transaction
+from django.db import DatabaseError, close_old_connections, connection, transaction
 from django.db.models import Exists, OuterRef, Q
 
 from publishing.base import Delivery, Location, Message, Operation, PublishError
@@ -39,7 +44,9 @@ MAX_ATTEMPTS = 5
 RETRY_DELAY = timedelta(seconds=30)  # doubled after every failed attempt
 MAX_RETRY_DELAY = timedelta(hours=1)
 LEASE = timedelta(minutes=5)
-POLL_INTERVAL = 30  # seconds between looks at the queue when it is empty
+POLL_INTERVAL = 30  # seconds between looks at the queue without a notification
+RECONNECT_DELAY = 5  # seconds before listening again after a lost connection
+CHANNEL = "publishing"  # NOTIFY channel; the payload is the event id
 
 Status = PublicationEvent.Status
 FINISHED = [Status.PROCESSED, Status.PUBLISHED]
@@ -224,10 +231,81 @@ def process_next(publishers):
     return True
 
 
-def work(publishers, once):
-    """One thread: process events until none is claimable (once), or forever."""
+def notify(event_id):
+    """Wake the listening workers. Called through transaction.on_commit, so
+    a change that is rolled back wakes nobody."""
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_notify(%s, %s)", [CHANNEL, str(event_id)])
+
+
+class Wakeup:
+    """Lets idle threads sleep until there may be new work. The generation
+    counter keeps a wake-up that comes between a thread's look at the queue
+    and its wait from being missed."""
+
+    def __init__(self):
+        self._condition = threading.Condition()
+        self._generation = 0
+
+    def current(self):
+        with self._condition:
+            return self._generation
+
+    def wake(self):
+        with self._condition:
+            self._generation += 1
+            self._condition.notify_all()
+
+    def wait(self, seen, timeout=None):
+        """Wait until woken after generation `seen`; False on timeout."""
+        with self._condition:
+            return self._condition.wait_for(lambda: self._generation != seen, timeout)
+
+
+def listen(wakeup, stop, ready=None):
+    """LISTEN on CHANNEL and wake the threads for every notification, and
+    every POLL_INTERVAL anyway: retries that became due, expired leases and
+    notifications missed while disconnected send none. Returns once `stop`
+    is set (checked every second); `ready` is set once listening."""
     try:
-        while True:
+        with connection.cursor() as cursor:
+            cursor.execute(f"LISTEN {CHANNEL}")
+        pg = connection.connection
+        if ready:
+            ready.set()
+        polled = time.monotonic()
+        while not stop.is_set():
+            if select.select([pg], [], [], 1)[0]:
+                pg.poll()
+                if pg.notifies:
+                    pg.notifies.clear()
+                    wakeup.wake()
+                    polled = time.monotonic()
+                    continue
+            if time.monotonic() - polled >= POLL_INTERVAL:
+                wakeup.wake()
+                polled = time.monotonic()
+    finally:
+        connection.close()  # also ends the LISTEN
+
+
+def keep_listening(wakeup, stop, ready=None):
+    """listen(), reconnecting after a lost connection."""
+    while not stop.is_set():
+        try:
+            listen(wakeup, stop, ready)
+        except (DatabaseError, OSError):
+            logger.exception("Lost the notification connection, reconnecting in %d s", RECONNECT_DELAY)
+            wakeup.wake()  # look at the queue in case notifications were missed
+            stop.wait(RECONNECT_DELAY)
+
+
+def work(publishers, once, wakeup, stop):
+    """One thread: process events until none is claimable (once), or until
+    `stop`, sleeping while idle until woken."""
+    try:
+        while not stop.is_set():
+            seen = wakeup.current()
             try:
                 if process_next(publishers):
                     close_old_connections()
@@ -235,23 +313,33 @@ def work(publishers, once):
             except Exception:
                 if once:
                     raise
-                logger.exception("Worker thread error, continuing after the poll interval")
+                logger.exception("Worker thread error, continuing at the next wake-up")
             if once:
                 return
-            time.sleep(POLL_INTERVAL)
+            wakeup.wait(seen)
     finally:
         connection.close()  # this thread's own connection
 
 
-def run(publishers, once=False, workers=None):
+def run(publishers, once=False, workers=None, stop=None, ready=None):
     """Process events in `workers` threads (default settings.PUBLISHING_WORKERS)
-    sharing the publishers, whose transports are opened once."""
+    sharing the publishers, whose transports are opened once. Without `once`
+    this runs until `stop` is set; the threads finish their current event
+    first."""
     workers = workers or settings.PUBLISHING_WORKERS
+    stop = stop or threading.Event()
+    wakeup = Wakeup()
     for publisher in publishers:
         publisher.open()
     try:
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="publisher") as pool:
-            futures = [pool.submit(work, publishers, once) for _ in range(workers)]
+            futures = [pool.submit(work, publishers, once, wakeup, stop) for _ in range(workers)]
+            if not once:
+                try:
+                    keep_listening(wakeup, stop, ready)
+                finally:
+                    stop.set()
+                    wakeup.wake()
             for future in futures:
                 future.result()
     finally:
