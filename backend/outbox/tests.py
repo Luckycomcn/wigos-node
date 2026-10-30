@@ -1,17 +1,23 @@
+import base64
 import copy
+import hashlib
 import json
+from datetime import timedelta
 
+from django.core.management import call_command
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from api import stations
 from api.models import Station, WIGOSNodeGroup, WIGOSNodeUser
-from publishing.base import Event, Operation
+from publishing.base import DefaultPublisher, Event, Location, MessageGenerator, Operation, PublishError, TransportLayer
 from publishing.generators.wmdr2 import RecordFileGenerator
 from publishing.generators.wnm import WNMGenerator
 from publishing.registry import ConfigurationError
 
+from . import worker
 from .checks import check_publishers
 from .models import PublicationEvent
 from .publishers import get_publishers
@@ -226,3 +232,235 @@ class PublishersSettingTestCase(SimpleTestCase):
         self.addCleanup(get_publishers.cache_clear)
         self.assertEqual(check_publishers(None), [])
         self.assertEqual(get_publishers(), [])
+
+
+class MemoryStorage(TransportLayer):
+    """Stores files in a dict at mem://store/<name>."""
+
+    def __init__(self):
+        super().__init__()
+        self.files = {}
+        self.puts = 0
+        self.fail_remove = False
+
+    def send(self, message):
+        self.puts += 1
+        url = f"mem://store/{message.name}"
+        self.files[url] = message.body
+        return Location(url)
+
+    def remove(self, location):
+        if self.fail_remove:
+            raise PublishError("storage down")
+        del self.files[location.url]
+
+
+class MemoryBroker(TransportLayer):
+    """Keeps the sent WNMs; refuses the next `failures` sends."""
+
+    def __init__(self):
+        super().__init__()
+        self.sent = []
+        self.failures = 0
+
+    def send(self, message):
+        if self.failures:
+            self.failures -= 1
+            raise PublishError("broker down")
+        self.sent.append(json.loads(message.body))
+        return None
+
+
+class MemoryRetrievalPublisher(DefaultPublisher):
+    def __init__(self, *args, storage, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.storage = storage
+
+    def retrieve(self, location):
+        return self.storage.files[location.url]
+
+
+class BrokenGenerator(MessageGenerator):
+    def generate(self, event, deliveries):
+        raise RuntimeError("boom")
+
+
+KEYS = ["station:42", "wsi:0-756-0-outbox"]
+
+
+class WorkerTestCase(TestCase):
+    def setUp(self):
+        PublicationEvent.objects.all().delete()
+        self.storage = MemoryStorage()
+        self.broker = MemoryBroker()
+        self.publishers = [
+            DefaultPublisher("files", RecordFileGenerator(centre_id="io-test"), self.storage),
+            MemoryRetrievalPublisher("wnm", WNMGenerator(centre_id="io-test"), self.broker, storage=self.storage),
+        ]
+
+    def process_due(self):
+        PublicationEvent.objects.filter(status=PublicationEvent.Status.PENDING).update(next_attempt_at=None)
+        return worker.process_next(self.publishers)
+
+    def test_publishes_the_file_then_its_wnm(self):
+        row = make_row(operation=Operation.CREATE, ordering_keys=KEYS)
+
+        self.assertTrue(worker.process_next(self.publishers))
+
+        row.refresh_from_db()
+        self.assertEqual(row.status, PublicationEvent.Status.PROCESSED)
+        self.assertEqual(row.completed, ["files", "wnm"])
+        self.assertIsNotNone(row.finished_at)
+        url = row.deliveries[0]["url"]
+        self.assertEqual(row.deliveries, [
+            {"publisher": "files", "name": url.removeprefix("mem://store/"), "media_type": "application/geo+json",
+             "topic": None, "url": url, "internal_url": None},
+            {"publisher": "wnm", "name": None, "media_type": "application/geo+json",
+             "topic": None, "url": None, "internal_url": None},
+        ])
+        [wnm] = self.broker.sent
+        self.assertEqual((wnm["links"][0]["href"], wnm["links"][0]["rel"]), (url, "canonical"))
+        digest = base64.b64encode(hashlib.sha512(self.storage.files[url]).digest()).decode()
+        self.assertEqual(wnm["properties"]["integrity"]["value"], digest)
+        self.assertFalse(worker.process_next(self.publishers))
+
+    def test_retry_skips_completed_publishers_and_reuses_the_stored_file(self):
+        row = make_row(ordering_keys=KEYS)
+        self.broker.failures = 1
+
+        with self.assertLogs("outbox", "WARNING"):
+            worker.process_next(self.publishers)
+
+        row.refresh_from_db()
+        self.assertEqual((row.status, row.attempts, row.completed), (PublicationEvent.Status.PENDING, 1, ["files"]))
+        self.assertIn("wnm: broker down", row.last_error)
+        self.assertGreater(row.next_attempt_at, timezone.now())
+        self.assertFalse(worker.process_next(self.publishers))  # not due yet
+
+        self.assertTrue(self.process_due())
+
+        row.refresh_from_db()
+        self.assertEqual(row.status, PublicationEvent.Status.PROCESSED)
+        self.assertEqual(self.storage.puts, 1)
+        self.assertEqual(self.broker.sent[0]["links"][0]["href"], row.deliveries[0]["url"])
+
+    def test_retry_delay_doubles_up_to_an_hour(self):
+        self.assertEqual([worker.retry_delay(n) for n in (1, 2, 3)], [timedelta(seconds=s) for s in (30, 60, 120)])
+        self.assertEqual(worker.retry_delay(20), timedelta(hours=1))
+
+    def test_gives_up_after_the_last_attempt_and_removes_the_stored_file(self):
+        row = make_row(ordering_keys=KEYS)
+        self.broker.failures = 99
+
+        with self.assertLogs("outbox", "WARNING"):
+            for _ in range(worker.MAX_ATTEMPTS):
+                self.process_due()
+
+        row.refresh_from_db()
+        self.assertEqual((row.status, row.attempts), (PublicationEvent.Status.FAILED, worker.MAX_ATTEMPTS))
+        self.assertEqual((row.completed, row.deliveries), ([], []))
+        self.assertIsNotNone(row.finished_at)
+        self.assertEqual(self.storage.files, {})
+        self.assertFalse(self.process_due())  # failed events aren't retried
+
+    def test_a_failing_undo_is_recorded_and_the_event_stays_failed(self):
+        row = make_row(ordering_keys=KEYS)
+        self.broker.failures = 99
+        self.storage.fail_remove = True
+
+        with self.assertLogs("outbox", "WARNING"):
+            for _ in range(worker.MAX_ATTEMPTS):
+                self.process_due()
+
+        row.refresh_from_db()
+        self.assertEqual(row.status, PublicationEvent.Status.FAILED)
+        self.assertIn("undo files: storage down", row.last_error)
+        self.assertEqual(row.completed, ["files"])  # the file may still be stored
+        self.assertEqual([d["publisher"] for d in row.deliveries], ["files"])
+        self.assertEqual(len(self.storage.files), 1)
+
+    def test_a_crashing_plugin_counts_as_a_failed_attempt(self):
+        row = make_row(ordering_keys=KEYS)
+        publishers = [DefaultPublisher("broken", BrokenGenerator(), self.broker)]
+
+        with self.assertLogs("outbox", "WARNING"):
+            worker.process_next(publishers)
+
+        row.refresh_from_db()
+        self.assertEqual((row.status, row.attempts), (PublicationEvent.Status.PENDING, 1))
+        self.assertIn("broken: boom", row.last_error)
+
+    def test_deletion_links_to_the_last_processed_file_and_keeps_it(self):
+        create = make_row(operation=Operation.CREATE, ordering_keys=KEYS)
+        worker.process_next(self.publishers)
+        deletion = make_row(operation=Operation.DELETE, ordering_keys=KEYS)
+
+        worker.process_next(self.publishers)
+
+        create.refresh_from_db()
+        deletion.refresh_from_db()
+        self.assertEqual(deletion.status, PublicationEvent.Status.PROCESSED)
+        link = self.broker.sent[1]["links"][0]
+        self.assertEqual((link["href"], link["rel"]), (create.deliveries[0]["url"], "deletion"))
+        self.assertEqual([d["publisher"] for d in deletion.deliveries], ["wnm"])  # the file is create's
+        self.assertEqual(self.storage.puts, 1)
+        self.assertIn(create.deliveries[0]["url"], self.storage.files)
+
+    def later(self):
+        return timezone.now() + timedelta(hours=1)
+
+    def test_a_station_waits_for_its_older_events(self):
+        make_row(ordering_keys=["station:1", "wsi:a"], next_attempt_at=self.later())  # retrying
+        make_row(ordering_keys=["station:1", "wsi:a"])
+        other = make_row(ordering_keys=["station:2", "wsi:b"])
+        self.assertEqual(worker.claim(), other)
+
+    def test_order_is_kept_across_a_wsi_change(self):
+        make_row(ordering_keys=["station:1", "wsi:a", "wsi:b"], next_attempt_at=self.later())  # a renamed to b
+        make_row(ordering_keys=["station:1", "wsi:b"])
+        self.assertIsNone(worker.claim())
+
+    def test_a_moved_wsi_waits_for_the_station_it_left(self):
+        left = make_row(ordering_keys=["station:1", "wsi:a"], next_attempt_at=self.later())
+        joined = make_row(ordering_keys=["station:2", "wsi:a", "wsi:c"])
+        self.assertIsNone(worker.claim())
+
+        left.status = PublicationEvent.Status.PROCESSED
+        left.save()
+        self.assertEqual(worker.claim(), joined)
+
+    def test_a_cleaned_up_failed_event_releases_its_station(self):
+        make_row(ordering_keys=["station:1"], status=PublicationEvent.Status.FAILED)
+        later = make_row(ordering_keys=["station:1"])
+        self.assertEqual(worker.claim(), later)
+
+    def test_a_failed_event_with_leftovers_holds_back_its_station(self):
+        make_row(ordering_keys=["station:1"], status=PublicationEvent.Status.FAILED, completed=["files"])
+        make_row(ordering_keys=["station:1"])
+        self.assertIsNone(worker.claim())
+
+    def test_the_next_change_goes_ahead_once_a_failed_event_is_undone(self):
+        failed = make_row(ordering_keys=KEYS)
+        later = make_row(ordering_keys=KEYS)
+        self.broker.failures = worker.MAX_ATTEMPTS
+
+        with self.assertLogs("outbox", "WARNING"):
+            for _ in range(worker.MAX_ATTEMPTS):
+                self.process_due()
+        self.assertTrue(self.process_due())
+
+        failed.refresh_from_db()
+        later.refresh_from_db()
+        self.assertEqual((failed.status, failed.completed), (PublicationEvent.Status.FAILED, []))
+        self.assertEqual(later.status, PublicationEvent.Status.PROCESSED)
+
+    def test_run_once_processes_the_queue_with_the_configured_publishers(self):
+        make_row(operation=Operation.CREATE, ordering_keys=["station:1"])
+        make_row(operation=Operation.CREATE, ordering_keys=["station:2"])
+
+        with self.assertLogs("publishing", "INFO"):
+            call_command("run_publishers", "--once")
+
+        self.assertEqual(
+            set(PublicationEvent.objects.values_list("status", flat=True)), {PublicationEvent.Status.PROCESSED}
+        )
