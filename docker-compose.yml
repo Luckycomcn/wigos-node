@@ -30,14 +30,14 @@ services:
       retries: 10
 
   backend:
-    build:
+    build: &backend-build
       context: ./backend
       additional_contexts:
         publishing: ./publishing
     restart: unless-stopped
     env_file:
       - .env
-    environment:
+    environment: &backend-environment
       - POSTGRES_HOST=db
     # 不再挂 ./backend:/app —— 镜像里是构建好的代码，容器内容与镜像一致，
     # 回滚就是换镜像。
@@ -50,6 +50,62 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
+  # Publishes station changes queued in the outbox (backend/outbox), with the
+  # backend's image and settings. It doesn't reload on code changes: restart
+  # it after editing backend/outbox or publishing/.
+  publisher:
+    build: *backend-build
+    restart: unless-stopped
+    environment: *backend-environment
+    env_file:
+      - .env
+    # 不挂卷：镜像里就是构建好的代码，worker 不需要读写宿主机文件。
+    # Not the backend's entrypoint: the backend runs the migrations, and this
+    # waits until they are applied. exec makes the worker PID 1, so docker
+    # stop's SIGTERM reaches it and it finishes its current events.
+    entrypoint:
+      - sh
+      - -c
+      - until python manage.py migrate --check > /dev/null 2>&1; do sleep 2; done; exec python manage.py run_publishers
+    stop_grace_period: 30s
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_started
+      minio:
+        condition: service_healthy
+
+  # Web storage for the published record files (WIS2): the publisher stores
+  # them, WNMs link to them. The S3 API is on 9000, the console on 9001. In
+  # development the publisher creates the bucket (WNM_STORAGE_CREATE_BUCKET).
+  # wis2box's MinIO build, configured as in wis2box's docker-compose.yml. The
+  # image is hardcoded and updated on release.
+  minio:
+    image: ghcr.io/world-meteorological-organization/wis2box-minio:latest
+    restart: unless-stopped
+    command: server --quiet --console-address ":9001" /data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      # 原版这里默认 minioadmin，与库口令同样是公开值，未设置时直接报错退出。
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD 未设置，见 .env.example}
+      MINIO_BROWSER_LOGIN_ANIMATION: "off"
+      MINIO_BROWSER_REDIRECT: "false"
+      MINIO_UPDATE: "off"
+    volumes:
+      - minio_data:/data
+    # 只绑回环。原版 "9000:9000" 是绑 0.0.0.0：S3 接口带弱口令就等同对外开放读写，
+    # 控制台 9001 更是直接把桶内容摆出来。publisher 走 compose 内网 minio:9000，
+    # 不需要暴露给宿主机以外。
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 1s
+      retries: 3
 
   frontend:
     build: ./frontend
@@ -64,3 +120,4 @@ services:
 volumes:
   db_data:
   staticfiles:
+  minio_data:

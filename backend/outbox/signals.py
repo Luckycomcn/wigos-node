@@ -2,8 +2,12 @@
 
 The row is written by the save/delete itself, inside its transaction: a
 change rolled back (a rejected batch update, a dry run) leaves no event.
+Once the transaction commits, the worker is woken with a NOTIFY.
 Changes that bypass signals (QuerySet.update(), raw SQL) are not queued."""
 
+from functools import partial
+
+from django.db import transaction
 from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 
@@ -11,6 +15,7 @@ from api.models import Station
 from api.stations import issuer_of, wsis_of
 from publishing.base import Operation
 
+from . import worker
 from .models import PublicationEvent
 
 
@@ -24,7 +29,7 @@ def _queue(station, operation, wmdrv2, previous_wmdrv2=None):
     changed_by = station.__dict__.pop("_changed_by", None)
     source = station.__dict__.pop("_source", PublicationEvent.Source.SYSTEM)
     wsis = list(dict.fromkeys(_wsis(previous_wmdrv2) + _wsis(wmdrv2)))
-    PublicationEvent.objects.create(
+    event = PublicationEvent.objects.create(
         operation=operation,
         station_id=station.pk,
         wigos_identifier=wmdrv2.get("id") or "",
@@ -35,6 +40,8 @@ def _queue(station, operation, wmdrv2, previous_wmdrv2=None):
         issuers=list(dict.fromkeys(issuer_of(wsi) for wsi in wsis)),
         ordering_keys=[f"station:{station.pk}"] + [f"wsi:{wsi}" for wsi in wsis],
     )
+    # discarded with the change if it is rolled back (savepoints included)
+    transaction.on_commit(partial(worker.notify, event.pk))
 
 
 @receiver(pre_save, sender=Station)
