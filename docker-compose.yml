@@ -19,12 +19,12 @@ services:
       retries: 10
 
   backend:
-    build:
+    build: &backend-build
       context: ./backend
       additional_contexts:
         publishing: ./publishing
     restart: unless-stopped
-    environment:
+    environment: &backend-environment
       - POSTGRES_DB=${POSTGRES_DB:-app_db}
       - POSTGRES_USER=${POSTGRES_USER:-app_user}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-app_password}
@@ -32,7 +32,7 @@ services:
       - POSTGRES_PORT=${POSTGRES_PORT:-5432}
     env_file:
       - .env
-    volumes:
+    volumes: &backend-volumes
       - ./backend:/app
       - ./publishing:/publishing
       - ./test_data:/test_data
@@ -41,6 +41,30 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
+  # Publishes station changes queued in the outbox (backend/outbox), with the
+  # backend's image and settings. It doesn't reload on code changes: restart
+  # it after editing backend/outbox or publishing/.
+  publisher:
+    build: *backend-build
+    restart: unless-stopped
+    environment: *backend-environment
+    env_file:
+      - .env
+    volumes: *backend-volumes
+    # Not the backend's entrypoint: the backend runs the migrations, and this
+    # waits until they are applied. exec makes the worker PID 1, so docker
+    # stop's SIGTERM reaches it and it finishes its current events.
+    entrypoint:
+      - sh
+      - -c
+      - until python manage.py migrate --check > /dev/null 2>&1; do sleep 2; done; exec python manage.py run_publishers
+    stop_grace_period: 30s
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_started
 
   frontend:
     build: ./frontend

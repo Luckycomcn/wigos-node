@@ -144,6 +144,20 @@ PUBLISHERS = [
 # or WIGOS ID never run at the same time.
 PUBLISHING_WORKERS = int(os.environ.get("PUBLISHING_WORKERS", "8"))
 
+# Publishing logs to the console (docker compose logs publisher); INFO shows
+# every processed event and, with the log transports, every message.
+PUBLISHING_LOG_LEVEL = os.environ.get("PUBLISHING_LOG_LEVEL", "INFO")
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {"plain": {"format": "%(asctime)s %(levelname)s %(name)s %(threadName)s: %(message)s"}},
+    "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "plain"}},
+    "loggers": {
+        "outbox": {"handlers": ["console"], "level": PUBLISHING_LOG_LEVEL},
+        "publishing": {"handlers": ["console"], "level": PUBLISHING_LOG_LEVEL},
+    },
+}
+
 REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.AllowAny",
