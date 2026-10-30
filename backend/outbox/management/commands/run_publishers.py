@@ -9,6 +9,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--once", action="store_true", help="Process the due events, then exit (tests, cron).")
+        parser.add_argument("--workers", type=int, help="Threads (default settings.PUBLISHING_WORKERS).")
 
-    def handle(self, *args, once=False, **options):
-        worker.run(get_publishers(), once=once)
+    def handle(self, *args, once=False, workers=None, **options):
+        worker.run(get_publishers(), once=once, workers=workers)

@@ -2,17 +2,29 @@ import base64
 import copy
 import hashlib
 import json
+import threading
+import time
 from datetime import timedelta
+from unittest import mock
 
 from django.core.management import call_command
-from django.test import SimpleTestCase, TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from api import stations
 from api.models import Station, WIGOSNodeGroup, WIGOSNodeUser
-from publishing.base import DefaultPublisher, Event, Location, MessageGenerator, Operation, PublishError, TransportLayer
+from publishing.base import (
+    DefaultPublisher,
+    Event,
+    Location,
+    Message,
+    MessageGenerator,
+    Operation,
+    PublishError,
+    TransportLayer,
+)
 from publishing.generators.wmdr2 import RecordFileGenerator
 from publishing.generators.wnm import WNMGenerator
 from publishing.registry import ConfigurationError
@@ -454,6 +466,163 @@ class WorkerTestCase(TestCase):
         self.assertEqual((failed.status, failed.completed), (PublicationEvent.Status.FAILED, []))
         self.assertEqual(later.status, PublicationEvent.Status.PROCESSED)
 
+    def test_claiming_takes_a_lease(self):
+        row = make_row(ordering_keys=KEYS)
+
+        self.assertEqual(worker.claim(), row)
+
+        row.refresh_from_db()
+        self.assertEqual(row.status, PublicationEvent.Status.PROCESSING)
+        self.assertGreater(row.locked_until, timezone.now())
+        self.assertIsNone(worker.claim())  # held by the lease
+
+    def test_leases_follow_the_database_clock(self):
+        row = make_row(ordering_keys=KEYS)
+        worker.claim()
+        # a worker whose clock runs a day ahead still sees the lease as held
+        with mock.patch("django.utils.timezone.now", return_value=timezone.now() + timedelta(days=1)):
+            self.assertIsNone(worker.claim())
+        row.refresh_from_db()
+        self.assertAlmostEqual(row.locked_until, worker.db_now() + worker.LEASE, delta=timedelta(seconds=5))
+
+    def test_finishing_drops_the_lease(self):
+        row = make_row(ordering_keys=KEYS)
+        worker.process_next(self.publishers)
+        row.refresh_from_db()
+        self.assertEqual((row.status, row.locked_until), (PublicationEvent.Status.PROCESSED, None))
+
+    def store_record_file(self, row):
+        """As if the storage publisher ran before the worker crashed."""
+        [delivery] = self.publishers[0].publish(row.to_event(), [])
+        PublicationEvent.objects.filter(pk=row.pk).update(
+            completed=["files"], deliveries=[worker.dump_delivery(delivery)]
+        )
+
+    def crashed_row(self, attempts):
+        row = make_row(
+            ordering_keys=KEYS,
+            status=PublicationEvent.Status.PROCESSING,
+            locked_until=timezone.now() - timedelta(seconds=1),
+            attempts=attempts,
+        )
+        self.store_record_file(row)
+        return row
+
+    def test_a_crashed_event_is_reclaimed_and_resumed(self):
+        row = self.crashed_row(attempts=0)
+
+        with self.assertLogs("outbox", "WARNING"):
+            self.assertTrue(worker.process_next(self.publishers))
+
+        row.refresh_from_db()
+        self.assertEqual((row.status, row.attempts), (PublicationEvent.Status.PROCESSED, 1))
+        self.assertIn("lease expired", row.last_error)
+        self.assertEqual(self.storage.puts, 1)  # not stored again
+        self.assertEqual(self.broker.sent[0]["links"][0]["href"], row.deliveries[0]["url"])
+
+    def test_a_crash_on_the_last_attempt_is_undone(self):
+        row = self.crashed_row(attempts=worker.MAX_ATTEMPTS - 1)
+
+        with self.assertLogs("outbox", "WARNING"):
+            worker.process_next(self.publishers)
+
+        row.refresh_from_db()
+        self.assertEqual((row.status, row.attempts), (PublicationEvent.Status.FAILED, worker.MAX_ATTEMPTS))
+        self.assertEqual((row.completed, row.deliveries), ([], []))
+        self.assertEqual(self.storage.files, {})
+        self.assertEqual(self.broker.sent, [])
+
+    def test_a_worker_that_lost_its_lease_stops(self):
+        row = make_row(ordering_keys=KEYS)
+        claimed = worker.claim()
+        # the lease expired and another worker claimed the event again
+        PublicationEvent.objects.filter(pk=row.pk).update(locked_until=timezone.now() + timedelta(minutes=9))
+
+        with self.assertRaises(worker.LeaseLost):
+            worker.process(claimed, self.publishers)
+
+        row.refresh_from_db()
+        self.assertEqual(row.completed, [])  # nothing written by the old worker
+
+
+class EventIdGenerator(MessageGenerator):
+    def generate(self, event, deliveries):
+        return [Message(body=str(event.id).encode(), media_type="text/plain")]
+
+
+class TogetherTransport(TransportLayer):
+    """Fails unless two sends happen at the same time."""
+
+    def __init__(self):
+        super().__init__()
+        self.barrier = threading.Barrier(2, timeout=10)
+
+    def send(self, message):
+        try:
+            self.barrier.wait()
+        except threading.BrokenBarrierError:
+            raise PublishError("sent alone")
+
+
+class OverlapTransport(TransportLayer):
+    """Slow sends, recording their order and the most that ran at once."""
+
+    def __init__(self):
+        super().__init__()
+        self.lock = threading.Lock()
+        self.active = self.most_active = self.opened = self.closed = 0
+        self.order = []
+
+    def open(self):
+        self.opened += 1
+
+    def close(self):
+        self.closed += 1
+
+    def send(self, message):
+        with self.lock:
+            self.active += 1
+            self.most_active = max(self.most_active, self.active)
+        time.sleep(0.1)
+        with self.lock:
+            self.active -= 1
+            self.order.append(int(message.body))
+
+
+class ParallelWorkerTestCase(TransactionTestCase):
+    """Real threads with their own connections, so rows must be committed.
+
+    These tests need none of the data seeded by migrations. The flush after
+    each one removes it, which is fine because Django runs TransactionTestCases
+    after every TestCase. (serialized_rollback can't restore it: the api Group
+    post_save receiver doesn't skip raw saves.)"""
+
+    def statuses(self):
+        return set(PublicationEvent.objects.values_list("status", flat=True))
+
+    def test_unrelated_stations_are_published_at_the_same_time(self):
+        make_row(ordering_keys=["station:1", "wsi:a"])
+        make_row(ordering_keys=["station:2", "wsi:b"])
+
+        worker.run([DefaultPublisher("together", EventIdGenerator(), TogetherTransport())], once=True, workers=2)
+
+        self.assertEqual(self.statuses(), {PublicationEvent.Status.PROCESSED})
+
+    def test_related_events_never_run_at_the_same_time(self):
+        rows = [
+            make_row(ordering_keys=["station:1", "wsi:a"]),
+            make_row(ordering_keys=["station:1", "wsi:a", "wsi:b"]),  # a renamed to b
+            make_row(ordering_keys=["station:2", "wsi:b"]),  # b moved to station 2
+        ]
+        transport = OverlapTransport()
+
+        worker.run([DefaultPublisher("slow", EventIdGenerator(), transport)], once=True, workers=3)
+
+        self.assertEqual(self.statuses(), {PublicationEvent.Status.PROCESSED})
+        self.assertEqual(transport.most_active, 1)
+        self.assertEqual(transport.order, [row.pk for row in rows])
+        self.assertEqual((transport.opened, transport.closed), (1, 1))  # shared by the threads
+
     def test_run_once_processes_the_queue_with_the_configured_publishers(self):
         make_row(operation=Operation.CREATE, ordering_keys=["station:1"])
         make_row(operation=Operation.CREATE, ordering_keys=["station:2"])
@@ -461,6 +630,4 @@ class WorkerTestCase(TestCase):
         with self.assertLogs("publishing", "INFO"):
             call_command("run_publishers", "--once")
 
-        self.assertEqual(
-            set(PublicationEvent.objects.values_list("status", flat=True)), {PublicationEvent.Status.PROCESSED}
-        )
+        self.assertEqual(self.statuses(), {PublicationEvent.Status.PROCESSED})

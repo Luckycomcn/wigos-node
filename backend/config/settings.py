@@ -140,6 +140,9 @@ PUBLISHERS = [
         "ENABLED": os.environ.get("WIS2_PUBLISH_WNM", "true") == "true",
     },
 ]
+# Threads of the outbox worker (run_publishers); events of the same station
+# or WIGOS ID never run at the same time.
+PUBLISHING_WORKERS = int(os.environ.get("PUBLISHING_WORKERS", "8"))
 
 REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
