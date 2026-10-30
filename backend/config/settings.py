@@ -102,14 +102,18 @@ CSRF_TRUSTED_ORIGINS = os.environ.get(
 ).split(",")
 
 # WIS2 publishing (repo-root publishing/): this node's WIS2 centre id, and the
-# public web storage the announced record files are served from.
+# web storage (the minio service by default) the record files are stored in.
+# WNM_STORAGE_URL is where the public reaches the files (the WNM links);
+# the node itself retrieves them from WNM_STORAGE_INTERNAL_URL, by default
+# the endpoint and bucket.
 WNM_CENTRE_ID = os.environ.get("WNM_CENTRE_ID", "io-wis2dev-test-wigosnode")
 WNM_STORAGE_URL = os.environ.get("WNM_STORAGE_URL", "https://wigosnode.test.wis2dev.io/webstorage")
+WNM_STORAGE_SECURE = os.environ.get("WNM_STORAGE_SECURE", "false").lower() == "true"
 
 # Publishers the outbox worker runs, in this order, for every station change.
 # Classes are dotted paths into any installed package (publishing.registry).
-# Both still log instead of storing/sending until the MinIO and MQTT
-# transports exist (docs/publishing-plan.md, commits 12-13).
+# The WNMs still go to the log until the MQTT transport exists
+# (docs/publishing-plan.md, commit 13).
 PUBLISHERS = [
     {
         "NAME": "wis2-storage",
@@ -118,19 +122,26 @@ PUBLISHERS = [
             "OPTIONS": {"centre_id": WNM_CENTRE_ID},
         },
         "TRANSPORT": {
-            "CLASS": "publishing.transports.log.LogTransport",
-            # No link until the MinIO transport exists (commit 12): nothing is
-            # stored, so a link could not be retrieved for the WNM.
-            # "OPTIONS": {"url": WNM_STORAGE_URL},
+            "CLASS": "publishing.transports.s3.S3Transport",
+            "OPTIONS": {
+                "endpoint": os.environ.get("WNM_STORAGE_ENDPOINT", "minio:9000"),
+                "bucket": os.environ.get("WNM_STORAGE_BUCKET", "webstorage"),
+                # defaults: the minio service's root user in docker-compose.yml
+                "access_key": os.environ.get("WNM_STORAGE_ACCESS_KEY", "minioadmin"),
+                "secret_key": os.environ.get("WNM_STORAGE_SECRET_KEY", "minioadmin"),
+                "secure": WNM_STORAGE_SECURE,
+                "public_url": WNM_STORAGE_URL,
+                "internal_url": os.environ.get("WNM_STORAGE_INTERNAL_URL") or None,
+                # development: create the bucket with anonymous read if missing
+                "create_bucket": os.environ.get("WNM_STORAGE_CREATE_BUCKET", str(DEBUG)).lower() == "true",
+            },
         },
     },
     {
         "NAME": "wis2-wnm",
         "GENERATOR": {
             "CLASS": "publishing.generators.wnm.WNMGenerator",
-            # skip_missing until commit 12: the log storage gives no link, so
-            # there is nothing to announce yet. Remove it with the S3Transport.
-            "OPTIONS": {"centre_id": WNM_CENTRE_ID, "skip_missing": True},
+            "OPTIONS": {"centre_id": WNM_CENTRE_ID},
         },
         "TRANSPORT": {
             "CLASS": "publishing.transports.log.LogTransport",

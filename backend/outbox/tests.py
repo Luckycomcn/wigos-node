@@ -30,6 +30,7 @@ from publishing.base import (
 from publishing.generators.wmdr2 import RecordFileGenerator
 from publishing.generators.wnm import WNMGenerator
 from publishing.registry import ConfigurationError
+from publishing.transports.s3 import S3Transport
 
 from . import worker
 from .checks import check_publishers
@@ -236,7 +237,9 @@ class PublishersSettingTestCase(SimpleTestCase):
         storage, wnm = get_publishers()
         self.assertEqual((storage.name, wnm.name), ("wis2-storage", "wis2-wnm"))
         self.assertIsInstance(storage.generator, RecordFileGenerator)
+        self.assertIsInstance(storage.transport, S3Transport)
         self.assertIsInstance(wnm.generator, WNMGenerator)
+        self.assertFalse(wnm.generator.skip_missing)
 
     def test_publishers_are_built_once(self):
         self.assertIs(get_publishers()[0], get_publishers()[0])
@@ -645,6 +648,10 @@ class ParallelWorkerTestCase(TransactionTestCase):
         self.assertEqual(transport.order, [row.pk for row in rows])
         self.assertEqual((transport.opened, transport.closed), (1, 1))  # shared by the threads
 
+    @override_settings(PUBLISHERS=[
+        {"NAME": "files", "GENERATOR": {"CLASS": "publishing.generators.wmdr2.RecordFileGenerator",
+                                        "OPTIONS": {"centre_id": "io-test"}}, "TRANSPORT": {"CLASS": LOG}},
+    ])  # no storage in the tests
     def test_run_once_processes_the_queue_with_the_configured_publishers(self):
         make_row(operation=Operation.CREATE, ordering_keys=["station:1"])
         make_row(operation=Operation.CREATE, ordering_keys=["station:2"])

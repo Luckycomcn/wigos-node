@@ -65,6 +65,34 @@ services:
         condition: service_healthy
       backend:
         condition: service_started
+      minio:
+        condition: service_healthy
+
+  # Web storage for the published record files (WIS2): the publisher stores
+  # them, WNMs link to them. The S3 API is on 9000, the console on 9001. In
+  # development the publisher creates the bucket (WNM_STORAGE_CREATE_BUCKET).
+  # wis2box's MinIO build, configured as in wis2box's docker-compose.yml. The
+  # image is hardcoded and updated on release.
+  minio:
+    image: ghcr.io/world-meteorological-organization/wis2box-minio:latest
+    restart: unless-stopped
+    command: server --quiet --console-address ":9001" /data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BROWSER_LOGIN_ANIMATION: "off"
+      MINIO_BROWSER_REDIRECT: "false"
+      MINIO_UPDATE: "off"
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 1s
+      retries: 3
 
   frontend:
     build: ./frontend
@@ -82,3 +110,4 @@ services:
 
 volumes:
   db_data:
+  minio_data:
