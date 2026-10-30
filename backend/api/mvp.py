@@ -5,6 +5,7 @@ behaviour, and the rules that guard writes are the ones in api/stations.py.
 """
 import logging
 from pathlib import Path
+from urllib.parse import quote
 
 from django.conf import settings
 from django.contrib.gis.geos import Polygon
@@ -27,9 +28,78 @@ from .models import (
     StationTemplate,
     StationVersion,
 )
-from .renderers import render_wmdrv2
+from publishing.base import Operation
+from publishing.generators.wnm import create_wnm as _create_wnm
+from publishing.wmdr2 import render_record as _render_record
+from publishing.wmdr2 import record_file_name as _record_file_name
 from .stations import StationError
-from .wnm import CREATE, UPDATE, create_station_wnm, record_file_name
+
+
+# --------------------------------------------------------------------------- #
+# WNM 生成（上游 194dbb1 把 api/wnm.py 整体搬进 publishing/）
+#
+# 上游删掉了 backend/api/wnm.py，同一套逻辑现在在 publishing/generators/wnm.py。
+# 这里的发布流程（POST /api/wmdrv2/<id>/publish）早于上游重构就存在，所以保持
+# 自己的入口不变，只把实现指向 publishing —— 两份 WNM 不再各写一遍。
+#
+# 与上游函数的差异只有一处：上游 create_wnm 要求显式传 href / centre_id，因为
+# 它的调用方是"先存文件、拿到真链接再发通知"的 outbox 流程；本模块自己写
+# webstorage 并自己拼链接，所以在这里把这两个参数从 settings 补上。
+# --------------------------------------------------------------------------- #
+CREATE = "canonical"
+UPDATE = "update"
+DELETE = "deletion"
+
+# 上面三个是本模块对外沿用的取值（它们同时是 WNM 里的 link rel: canonical /
+# update / deletion）；上游 publishing 的 Operation 是另一套词表（create /
+# update / delete），两者不能混着传 —— 这里显式翻译一次。
+_OPERATIONS = {
+    CREATE: Operation.CREATE,
+    UPDATE: Operation.UPDATE,
+    DELETE: Operation.DELETE,
+}
+
+
+def _wnm_href(wmdrv2):
+    """本模块约定的公开链接：WNM_STORAGE_URL + 记录文件名。"""
+    name = _record_file_name(wmdrv2, settings.WNM_CENTRE_ID)
+    return f"{settings.WNM_STORAGE_URL.rstrip('/')}/{quote(name)}"
+
+
+def create_station_wnm(station, operation=CREATE, pubtime=None):
+    """为已保存的 Station 生成 WNM。不删除时以库里的存储副本为准——WNM 的
+    integrity 必须描述真正写进 webstorage 的那份字节，而不是内存里又渲染一遍。"""
+    try:
+        upstream_operation = _OPERATIONS[operation]
+    except KeyError:
+        raise ValueError(
+            f"Unknown WNM operation '{operation}', expected one of {tuple(_OPERATIONS)}"
+        ) from None
+
+    wmdrv2 = station.wmdrv2
+    if upstream_operation is not Operation.DELETE:
+        # 读回库里的副本，与 API 输出同一种键序；已被删除的行取不到，而删除
+        # 类通知本来也不带 integrity。
+        wmdrv2 = Station.objects.values_list("wmdrv2", flat=True).get(pk=station.pk)
+    content = None if upstream_operation is Operation.DELETE else _render_record(wmdrv2)
+    return _create_wnm(
+        wmdrv2,
+        upstream_operation,
+        href=_wnm_href(wmdrv2),
+        centre_id=settings.WNM_CENTRE_ID,
+        content=content,
+        pubtime=pubtime,
+    )
+
+
+def record_file_name(wmdrv2):
+    """webstorage 里的文件名（centre_id 由配置提供，与上游同名函数一致）。"""
+    return _record_file_name(wmdrv2, settings.WNM_CENTRE_ID)
+
+
+def render_wmdrv2(wmdrv2):
+    """写进 webstorage 的字节；WNM 的 integrity 与 length 都按它计算。"""
+    return _render_record(wmdrv2)
 
 logger = logging.getLogger(__name__)
 
