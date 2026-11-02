@@ -57,19 +57,24 @@ async function handleLogout() {
 
 <template>
   <v-app>
-    <v-app-bar class="app-bar" height="88" flat>
+    <v-app-bar class="app-bar" height="100" flat>
       <template v-if="showNav" #prepend>
         <v-app-bar-nav-icon aria-label="Toggle the menu" @click="navOpen = !navOpen" />
       </template>
+      <img class="app-bar-logo" src="./assets/img/logo.png" alt="WMO logo" />
       <div class="app-bar-title">
         <h1>WMDR Station Record Builder</h1>
-        <p>Fill in station metadata and generate a WIGOS-conformant GeoJSON record.</p>
+        <!-- On narrower screens it would run into the dark part of the banner. -->
+        <p class="d-none d-lg-block">Fill in station metadata and generate a WIGOS-conformant GeoJSON record.</p>
       </div>
       <template v-if="status === 'authenticated'" #append>
-        <span class="mr-3">{{ user.email || user.username }}</span>
-        <v-btn variant="tonal" @click="handleLogout">Log out</v-btn>
+        <span class="app-bar-user mr-3">{{ user.email || user.username }}</span>
+        <v-btn class="app-bar-user" variant="tonal" @click="handleLogout">Log out</v-btn>
       </template>
     </v-app-bar>
+
+    <!-- Before the drawer, so that it spans the whole width below it. -->
+    <v-footer class="app-footer" height="12" app />
 
     <v-navigation-drawer v-if="showNav" v-model="navOpen">
       <v-list nav>
@@ -125,14 +130,32 @@ async function handleLogout() {
 </template>
 
 <style scoped>
+/* The clouds, with the coloured stripe below them. The banner is white on the
+   left and blue on the right, so the title is dark and the user's details light. */
 .app-bar {
-  background: linear-gradient(135deg, #1d4ed8, #3b82f6) !important;
-  color: #fff !important;
+  background:
+    url("./assets/img/wmo-foot.png") bottom / 100% 12px no-repeat,
+    url("./assets/img/wmo-banner.png") top / 100% calc(100% - 12px) no-repeat,
+    #fff !important;
+  color: #003a78 !important;
   padding: 0 1rem;
 }
 
+.app-bar :deep(.v-toolbar__content) {
+  padding-bottom: 12px;
+}
+
+.app-bar-logo {
+  height: 72px;
+  margin-right: 1rem;
+}
+
+.app-bar-title {
+  text-shadow: 0 0 6px rgba(255, 255, 255, 0.9);
+}
+
 .app-bar-title h1 {
-  color: #fff;
+  color: #003a78;
   font-size: 1.4rem;
   font-weight: 700;
   margin: 0;
@@ -140,8 +163,18 @@ async function handleLogout() {
 
 .app-bar-title p {
   margin: 0.25rem 0 0;
-  color: #dbeafe;
+  color: #1f2f46;
   font-size: 0.9rem;
+}
+
+.app-bar-user {
+  color: #fff;
+  text-shadow: 0 0 4px rgba(0, 58, 120, 0.9);
+}
+
+.app-footer {
+  background: url("./assets/img/wmo-foot.png") center / 100% 100% no-repeat;
+  padding: 0;
 }
 
 .app-main {
