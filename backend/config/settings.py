@@ -10,6 +10,8 @@ DEBUG = os.environ.get("DJANGO_DEBUG", "true").lower() == "true"
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,backend").split(",")
 
 INSTALLED_APPS = [
+    "api.apps.ApiConfig",
+    "outbox.apps.OutboxConfig",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -18,7 +20,8 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "corsheaders",
-    "api",
+    "django.contrib.postgres",
+    "guardian"
 ]
 
 MIDDLEWARE = [
@@ -55,7 +58,7 @@ ASGI_APPLICATION = "config.asgi.application"
 
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.postgresql",
+        "ENGINE": "django.contrib.gis.db.backends.postgis",
         "NAME": os.environ.get("POSTGRES_DB", "app_db"),
         "USER": os.environ.get("POSTGRES_USER", "app_user"),
         "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "app_password"),
@@ -71,6 +74,8 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
+AUTH_USER_MODEL = 'api.WIGOSNodeUser'
+
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
 USE_I18N = True
@@ -85,8 +90,101 @@ CORS_ALLOWED_ORIGINS = os.environ.get(
     "CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
 ).split(",")
 
+# Allow the SPA to send the session cookie on cross-origin API calls (used when
+# the frontend talks to :8000 directly instead of through the Vite dev proxy).
+CORS_ALLOW_CREDENTIALS = True
+
+# Origins Django trusts for unsafe (POST/PUT) requests. The Vite dev proxy keeps
+# the browser on :5173 while forwarding to Django, so that origin must be listed
+# or every login/write request is rejected with 403.
+CSRF_TRUSTED_ORIGINS = os.environ.get(
+    "CSRF_TRUSTED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+).split(",")
+
+# WIS2 publishing (repo-root publishing/): this node's WIS2 centre id, and the
+# web storage (the minio service by default) the record files are stored in.
+# WNM_STORAGE_URL is where the public reaches the files (the WNM links);
+# the node itself retrieves them from WNM_STORAGE_INTERNAL_URL, by default
+# the endpoint and bucket.
+WNM_CENTRE_ID = os.environ.get("WNM_CENTRE_ID", "io-wis2dev-test-wigosnode")
+WNM_STORAGE_URL = os.environ.get("WNM_STORAGE_URL", "https://wigosnode.test.wis2dev.io/webstorage")
+WNM_STORAGE_SECURE = os.environ.get("WNM_STORAGE_SECURE", "false").lower() == "true"
+
+# Publishers the outbox worker runs for every station change. Each is one process
+# from start to end, and they don't depend on each other.
+# Classes are dotted paths into any installed package (publishing.registry).
+PUBLISHERS = [
+    {
+        # WIS2, from start to end: store the record file, then announce it
+        "NAME": "wis2",
+        "STEPS": [
+            {
+                "NAME": "storage",
+                "GENERATOR": {
+                    "CLASS": "publishing.generators.wmdr2.RecordFileGenerator",
+                    "OPTIONS": {"centre_id": WNM_CENTRE_ID},
+                },
+                "TRANSPORT": {
+                    "CLASS": "publishing.transports.s3.S3Transport",
+                    "OPTIONS": {
+                        "endpoint": os.environ.get("WNM_STORAGE_ENDPOINT", "minio:9000"),
+                        "bucket": os.environ.get("WNM_STORAGE_BUCKET", "webstorage"),
+                        # defaults: the minio service's root user in docker-compose.yml
+                        "access_key": os.environ.get("WNM_STORAGE_ACCESS_KEY", "minioadmin"),
+                        "secret_key": os.environ.get("WNM_STORAGE_SECRET_KEY", "minioadmin"),
+                        "secure": WNM_STORAGE_SECURE,
+                        "public_url": WNM_STORAGE_URL,
+                        "internal_url": os.environ.get("WNM_STORAGE_INTERNAL_URL") or None,
+                        # development: create the bucket with anonymous read if missing
+                        "create_bucket": os.environ.get("WNM_STORAGE_CREATE_BUCKET", str(DEBUG)).lower() == "true",
+                    },
+                },
+            },
+            {
+                "NAME": "wnm",
+                "GENERATOR": {
+                    "CLASS": "publishing.generators.wnm.WNMGenerator",
+                    "OPTIONS": {"centre_id": WNM_CENTRE_ID},
+                },
+                "TRANSPORT": {
+                    "CLASS": "publishing.transports.mqtt.MQTTTransport",
+                    "OPTIONS": {
+                        # default: the mosquitto service in docker-compose.yml
+                        "url": os.environ.get("WIS2_BROKER_URL", "mqtt://wis2:wis2@mosquitto:1883"),
+                        # Placeholder: the WMDR2 topic is not decided yet
+                        "topic": os.environ.get("WIS2_TOPIC", f"origin/a/wis2/{WNM_CENTRE_ID}/TBD-wmdr2"),
+                    },
+                },
+                "ENABLED": os.environ.get("WIS2_PUBLISH_WNM", "true") == "true",
+            },
+        ],
+    },
+]
+# Threads of the outbox worker (run_publishers); events of the same station
+# or WIGOS ID never run at the same time.
+PUBLISHING_WORKERS = int(os.environ.get("PUBLISHING_WORKERS", "8"))
+
+# Publishing logs to the console (docker compose logs publisher); INFO shows
+# every processed event and, with the log transports, every message.
+PUBLISHING_LOG_LEVEL = os.environ.get("PUBLISHING_LOG_LEVEL", "INFO")
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {"plain": {"format": "%(asctime)s %(levelname)s %(name)s %(threadName)s: %(message)s"}},
+    "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "plain"}},
+    "loggers": {
+        "outbox": {"handlers": ["console"], "level": PUBLISHING_LOG_LEVEL},
+        "publishing": {"handlers": ["console"], "level": PUBLISHING_LOG_LEVEL},
+    },
+}
+
 REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.AllowAny",
     ],
 }
+
+AUTHENTICATION_BACKENDS = (
+    'django.contrib.auth.backends.ModelBackend',  # this is default
+    'guardian.backends.ObjectPermissionBackend',
+)
