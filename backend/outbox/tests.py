@@ -4,6 +4,7 @@ import hashlib
 import json
 import threading
 import time
+from contextlib import contextmanager
 from datetime import timedelta
 from functools import partial
 from unittest import mock
@@ -19,6 +20,7 @@ from api import stations
 from api.models import Station, WIGOSNodeGroup, WIGOSNodeUser
 from publishing.base import (
     DefaultPublisher,
+    Delivery,
     Event,
     Location,
     Message,
@@ -34,7 +36,7 @@ from publishing.registry import ConfigurationError
 from publishing.transports.mqtt import MQTTTransport
 from publishing.transports.s3 import S3Transport
 
-from . import worker
+from . import actions, worker
 from .checks import check_publishers
 from .models import PublicationEvent
 from .publishers import get_publishers
@@ -800,3 +802,298 @@ class NotifyTestCase(TransactionTestCase):
         self.assertEqual(row.status, PublicationEvent.Status.PROCESSED)
         finish()  # stops: the threads end, the transports are closed
         self.assertEqual((transport.opened, transport.closed), (1, 1))
+
+
+class AdminActionsTestCase(TestCase):
+    """Real failed events, made by the worker."""
+
+    def setUp(self):
+        PublicationEvent.objects.all().delete()
+        self.storage = MemoryStorage()
+        self.broker = MemoryBroker()
+        self.publishers = [
+            MemoryRetrievalPublisher(
+                "wis2",
+                [
+                    Step("storage", RecordFileGenerator(centre_id="io-test"), self.storage),
+                    Step("wnm", WNMGenerator(centre_id="io-test"), self.broker),
+                ],
+                storage=self.storage,
+            ),
+        ]
+
+    def failed_row(self, publishers=None, **fields):
+        row = make_row(ordering_keys=KEYS, **fields)
+        self.broker.failures = 1
+        with self.assertLogs("outbox", "WARNING"):
+            worker.process_next(publishers or self.publishers)
+        row.refresh_from_db()
+        self.assertEqual(row.status, PublicationEvent.Status.FAILED)
+        return row
+
+    def needs_cleanup_row(self):
+        self.storage.fail_remove = True
+        row = self.failed_row()
+        self.storage.fail_remove = False
+        self.assertTrue(row.needs_cleanup)
+        return row
+
+    def test_retry_regenerates_the_file_and_publishes(self):
+        row = self.failed_row()
+        self.assertEqual(self.storage.files, {})
+
+        actions.retry(row.pk, self.publishers)
+
+        row.refresh_from_db()
+        self.assertEqual((row.status, row.attempts, row.finished_at), (PublicationEvent.Status.PENDING, 0, None))
+        worker.process_next(self.publishers)
+        row.refresh_from_db()
+        self.assertEqual(row.status, PublicationEvent.Status.PROCESSED)
+        self.assertEqual(self.storage.puts, 2)
+        [wnm] = self.broker.sent
+        stored = self.storage.files[wnm["links"][0]["href"]]
+        digest = base64.b64encode(hashlib.sha512(stored).digest()).decode()
+        self.assertEqual(wnm["properties"]["integrity"]["value"], digest)
+
+    def test_retry_stores_the_file_again_even_when_an_undo_left_it(self):
+        row = self.needs_cleanup_row()
+        self.assertEqual(row.completed, ["wis2:storage"])
+
+        actions.retry(row.pk, self.publishers)
+
+        row.refresh_from_db()
+        self.assertEqual((row.completed, row.deliveries, row.needs_cleanup), ([], [], False))
+        worker.process_next(self.publishers)
+        self.assertEqual(self.storage.puts, 2)
+
+    def test_retry_leaves_a_working_publisher_alone(self):
+        other = MemoryBroker()
+        publishers = [DefaultPublisher("other", [Step("note", EventIdGenerator(), other)])] + self.publishers
+        row = self.failed_row(publishers)
+
+        actions.retry(row.pk, publishers)
+        worker.process_next(publishers)
+
+        row.refresh_from_db()
+        self.assertEqual(row.status, PublicationEvent.Status.PROCESSED)
+        self.assertEqual(len(other.sent), 1)
+        self.assertEqual(len(self.broker.sent), 1)
+
+    def test_retry_wakes_the_worker(self):
+        row = self.failed_row()
+        with self.captureOnCommitCallbacks() as callbacks:
+            actions.retry(row.pk, self.publishers)
+        self.assertEqual(len(callbacks), 1)
+
+    def test_retry_is_refused_once_a_later_event_shares_a_key(self):
+        row = self.failed_row()
+        make_row(ordering_keys=["station:99", KEYS[1]])
+        with self.assertRaisesMessage(actions.ActionRefused, "save the station again"):
+            actions.retry(row.pk, self.publishers)
+        row.refresh_from_db()
+        self.assertEqual(row.status, PublicationEvent.Status.FAILED)
+
+    def test_retry_is_not_held_back_by_unrelated_events(self):
+        row = self.failed_row()
+        make_row(ordering_keys=["station:99", "wsi:other"])
+        actions.retry(row.pk, self.publishers)
+
+    def test_only_failed_events_can_be_retried(self):
+        row = make_row(ordering_keys=KEYS, status=PublicationEvent.Status.PROCESSED)
+        with self.assertRaises(actions.ActionRefused):
+            actions.retry(row.pk, self.publishers)
+
+    def test_retry_cleanup_removes_the_file_and_releases_the_station(self):
+        row = self.needs_cleanup_row()
+        later = make_row(ordering_keys=KEYS)
+        self.assertIsNone(worker.claim())
+
+        actions.retry_cleanup(row.pk, self.publishers)
+
+        row.refresh_from_db()
+        self.assertEqual((row.status, row.needs_cleanup, row.completed), (PublicationEvent.Status.FAILED, False, []))
+        self.assertEqual(self.storage.files, {})
+        self.assertEqual(worker.claim(), later)
+
+    def test_a_failing_retry_cleanup_keeps_holding_the_station(self):
+        row = self.needs_cleanup_row()
+        self.storage.fail_remove = True
+        with self.assertLogs("outbox", "ERROR"), self.assertRaises(actions.ActionRefused):
+            actions.retry_cleanup(row.pk, self.publishers)
+        row.refresh_from_db()
+        self.assertTrue(row.needs_cleanup)
+        self.assertEqual(row.last_error.count("undo wis2: storage down"), 2)
+
+    def test_retry_cleanup_of_a_publisher_no_longer_configured_needs_marking(self):
+        row = self.needs_cleanup_row()
+        with self.assertRaises(actions.ActionRefused):
+            actions.retry_cleanup(row.pk, [])
+        row.refresh_from_db()
+        self.assertTrue(row.needs_cleanup)
+        self.assertIn("no longer configured: wis2", row.last_error)
+
+    def test_retry_cleanup_is_only_for_events_that_need_it(self):
+        row = self.failed_row()
+        with self.assertRaises(actions.ActionRefused):
+            actions.retry_cleanup(row.pk, self.publishers)
+
+    def test_mark_cleaned_up_forgets_the_leftovers_and_notes_who(self):
+        row = self.needs_cleanup_row()
+        self.assertEqual(len(actions.leftovers(row, self.publishers)), 1)
+
+        actions.mark_cleaned_up(row.pk, self.publishers, "someone")
+
+        row.refresh_from_db()
+        self.assertEqual((row.needs_cleanup, row.completed, row.deliveries), (False, [], []))
+        self.assertIn("marked as cleaned up by someone", row.last_error)
+        self.assertEqual(len(self.storage.files), 1)  # nothing is deleted
+
+    def test_mark_cleaned_up_keeps_what_a_working_publisher_delivered(self):
+        publishers = [DefaultPublisher("other", [Step("note", EventIdGenerator(), MemoryBroker())])] + self.publishers
+        self.storage.fail_remove = True
+        row = self.failed_row(publishers)
+
+        actions.mark_cleaned_up(row.pk, publishers, "someone")
+
+        row.refresh_from_db()
+        self.assertEqual(row.completed, ["other:note"])
+        self.assertEqual([d["publisher"] for d in row.deliveries], ["other"])
+
+
+class EventAdminTestCase(TestCase):
+    """The actions through the admin pages."""
+
+    failed_row = AdminActionsTestCase.failed_row
+    needs_cleanup_row = AdminActionsTestCase.needs_cleanup_row
+
+    def setUp(self):
+        AdminActionsTestCase.setUp(self)
+        self.admin = WIGOSNodeUser.objects.create_superuser(username="ev_admin", email="ev_admin@example.com", password="pw")
+        self.client.force_login(self.admin)
+        self.changelist = reverse("admin:outbox_publicationevent_changelist")
+
+        @contextmanager
+        def opened():
+            yield self.publishers
+
+        for target, replacement in (("get_publishers", lambda: self.publishers), ("opened_publishers", opened)):
+            patcher = mock.patch(f"outbox.admin.{target}", replacement)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def run_action(self, action, row, **extra):
+        data = {"action": action, "_selected_action": [row.pk], **extra}
+        return self.client.post(self.changelist, data, follow=True)
+
+    def test_events_are_read_only(self):
+        row = self.failed_row()
+        detail = self.client.get(reverse("admin:outbox_publicationevent_change", args=[row.pk]))
+        self.assertEqual(detail.status_code, 200)
+        self.assertContains(detail, "wis2:wnm: broker down")
+        self.assertContains(detail, "Retries are manual")
+        self.assertNotContains(detail, 'name="_save"')
+        self.assertEqual(self.client.get(reverse("admin:outbox_publicationevent_add")).status_code, 403)
+        self.assertEqual(self.client.get(reverse("admin:outbox_publicationevent_delete", args=[row.pk])).status_code, 403)
+        self.assertNotContains(self.client.get(self.changelist), "delete_selected")
+
+    def test_filters_and_banner_show_what_needs_cleaning_up(self):
+        self.assertNotContains(self.client.get(self.changelist), "need cleaning up")
+        row = self.needs_cleanup_row()
+
+        response = self.client.get(self.changelist)
+        self.assertContains(response, "1 failed events need cleaning up")
+        self.assertContains(response, "?needs_cleanup__exact=1")
+
+        filtered = self.client.get(self.changelist, {"needs_cleanup__exact": 1})
+        self.assertEqual([r.pk for r in filtered.context["cl"].result_list], [row.pk])
+
+    def test_retry_action(self):
+        row = self.failed_row()
+        self.assertContains(self.run_action("retry", row), "1 events queued again")
+        row.refresh_from_db()
+        self.assertEqual(row.status, PublicationEvent.Status.PENDING)
+
+    def test_a_refused_retry_says_why(self):
+        row = self.failed_row()
+        make_row(ordering_keys=KEYS)
+        self.assertContains(self.run_action("retry", row), "save the station again")
+        row.refresh_from_db()
+        self.assertEqual(row.status, PublicationEvent.Status.FAILED)
+
+    def test_retry_cleanup_action(self):
+        row = self.needs_cleanup_row()
+        self.assertContains(self.run_action("retry_cleanup", row), "1 events cleaned up")
+        row.refresh_from_db()
+        self.assertFalse(row.needs_cleanup)
+
+    def test_mark_cleaned_up_asks_first_and_lists_the_files(self):
+        row = self.needs_cleanup_row()
+        url = row.deliveries[0]["url"]
+
+        confirmation = self.run_action("mark_cleaned_up", row)
+        self.assertContains(confirmation, url)
+        self.assertContains(confirmation, 'name="confirmed"')
+        row.refresh_from_db()
+        self.assertTrue(row.needs_cleanup)
+
+        self.assertContains(self.run_action("mark_cleaned_up", row, confirmed="yes"), "1 events marked as cleaned up")
+        row.refresh_from_db()
+        self.assertFalse(row.needs_cleanup)
+        self.assertIn("marked as cleaned up by ev_admin", row.last_error)
+
+    def test_mark_cleaned_up_of_events_that_dont_need_it(self):
+        row = self.failed_row()
+        self.assertContains(self.run_action("mark_cleaned_up", row), "None of these events need cleaning up")
+
+    def test_superusers_see_the_full_log(self):
+        make_row(issuers=["756"], ordering_keys=["station:1"])
+        make_row(issuers=["76"], ordering_keys=["station:2"])
+        make_row(issuers=[], ordering_keys=["station:3"])
+        self.assertEqual(len(self.client.get(self.changelist).context["cl"].result_list), 3)
+
+    def test_nobody_else_gets_in_not_even_staff_in_an_issuer_group(self):
+        row = self.failed_row(issuers=["756"])
+        user = WIGOSNodeUser.objects.create_user(username="ev_staff", email="ev_staff@example.com", password="pw", is_staff=True)
+        user.groups.add(WIGOSNodeGroup.objects.get(issuer_identifier=756).group)
+        self.client.force_login(user)
+
+        self.assertEqual(self.client.get(self.changelist).status_code, 403)
+        self.assertNotContains(self.client.get(reverse("admin:index")), "Publication events")
+        self.assertEqual(self.run_action("retry", row).status_code, 403)
+        row.refresh_from_db()
+        self.assertEqual(row.status, PublicationEvent.Status.FAILED)
+
+
+class ReadBackReceiptsTestCase(TestCase):
+    def test_a_read_back_receipt_has_no_body(self):
+        delivery = Delivery("wis2", Message(b"secret", "text/plain", name="f"), Location("http://f"), step="storage")
+        loaded = worker.load_delivery(worker.dump_delivery(delivery))
+        self.assertIsNone(loaded.message.body)
+        self.assertEqual(loaded.location, delivery.location)
+        self.assertEqual((loaded.publisher, loaded.step, loaded.message.name), ("wis2", "storage", "f"))
+
+    def test_a_generator_relying_on_the_body_fails_instead_of_sending_nothing(self):
+        class Mirror(MessageGenerator):
+            def generate(self, event, deliveries):
+                return [Message(d.message.body, "text/plain") for d in deliveries]
+
+        PublicationEvent.objects.all().delete()
+        storage, mirrored = MemoryStorage(), MemoryBroker()
+        publisher = DefaultPublisher("pipe", [
+            Step("store", RecordFileGenerator(centre_id="io-test"), storage),
+            Step("mirror", Mirror(), mirrored),
+        ])
+        row = make_row(ordering_keys=KEYS)
+        [receipt] = publisher.run_step(publisher.steps[0], row.to_event(), [])
+        # as if the worker crashed between the steps
+        PublicationEvent.objects.filter(pk=row.pk).update(
+            completed=["pipe:store"], deliveries=[worker.dump_delivery(receipt)]
+        )
+
+        with self.assertLogs("outbox", "ERROR"):
+            worker.process_next([publisher])
+
+        row.refresh_from_db()
+        self.assertEqual(row.status, PublicationEvent.Status.FAILED)
+        self.assertIn("without a body", row.last_error)
+        self.assertEqual(mirrored.sent, [])

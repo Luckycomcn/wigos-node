@@ -46,7 +46,7 @@ class Event:
 
 @dataclass(frozen=True)
 class Message:
-    body: bytes
+    body: bytes | None  # None in a receipt read back from the outbox: it isn't kept
     media_type: str
     name: str | None = None  # file name for storage transports
     topic: str | None = None  # overrides the transport's default topic
@@ -67,7 +67,9 @@ class Location:
 
 @dataclass(frozen=True)
 class Delivery:
-    """Receipt of one sent message, handed to the later steps of its publisher."""
+    """Receipt of one sent message, handed to the later steps of its publisher.
+    For the stored file use `content` (see needs_content()), not message.body:
+    a receipt read back from the outbox has no body."""
 
     publisher: str  # name of the publisher that sent it
     message: Message
@@ -174,6 +176,8 @@ class Publisher(ABC):
                 for d in deliveries
             ]
         messages = step.generator.generate(event, deliveries)
+        if any(message.body is None for message in messages):
+            raise PublishError(f"Step {step.name} made a message without a body; use a delivery's content, not its body")
         locations = step.transport.send_many(messages)
         return [Delivery(self.name, m, location, step=step.name) for m, location in zip(messages, locations)]
 

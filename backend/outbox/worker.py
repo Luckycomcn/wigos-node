@@ -77,7 +77,7 @@ def dump_delivery(delivery):
 def load_delivery(data):
     return Delivery(
         publisher=data["publisher"],
-        message=Message(body=b"", media_type=data["media_type"], name=data["name"], topic=data["topic"]),
+        message=Message(body=None, media_type=data["media_type"], name=data["name"], topic=data["topic"]),
         location=Location(data["url"], data["internal_url"]) if data["url"] else None,
         step=data.get("step"),
     )
@@ -98,7 +98,8 @@ def retry_delay(attempts):
 def claim():
     """Take the oldest claimable event: pending and due, or processing with
     an expired lease (its worker crashed, so it resumes). Events behind an
-    older unreleased event sharing an ordering key are skipped. Returns the event, now processing under a new lease, or None."""
+    older unreleased event sharing an ordering key are skipped. Returns the
+    event, now processing under a new lease, or None."""
     now = db_now()
     blocking = PublicationEvent.objects.filter(
         id__lt=OuterRef("id"),
@@ -161,6 +162,11 @@ def previous_deliveries(row, publisher):
 def step_key(publisher, step_name):
     """How a publisher's step is recorded in `completed`."""
     return f"{publisher.name}:{step_name}"
+
+
+def failed_publishers(row, publishers):
+    """The publishers that haven't completed all their steps for this event."""
+    return [p for p in publishers if any(step_key(p, s.name) not in row.completed for s in p.steps)]
 
 
 def run_publisher(row, publisher, event):
