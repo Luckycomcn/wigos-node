@@ -25,7 +25,7 @@ function mountApp(status = "authenticated") {
       plugins: [createVuetify()],
       stubs: {
         LoginPage: { template: '<div class="login-page" />' },
-        StationsList: { template: '<div class="stations-page" />', emits: ["new", "edit", "batch"] },
+        StationsList: { template: '<div class="stations-page" />', emits: ["new", "edit", "batch", "changed"] },
         WmdrForm: { template: '<div class="form-page" />', emits: ["saved", "cancel"] },
         BatchWizard: { template: '<div class="batch-page" />', emits: ["applied", "close"] },
         PublicationsPage: { template: '<div class="publications-page" />', emits: ["changed"] },
@@ -129,6 +129,32 @@ describe("App sidebar", () => {
 
     listPublications.mockResolvedValue({ count: 1, results: [] });
     wrapper.findComponent(".publications-page").vm.$emit("changed");
+    await flushPromises();
+
+    expect(navItem("Publishing1")).toBeTruthy();
+  });
+
+  it("updates the counter when the stations page sees new statuses, such as a save that failed", async () => {
+    await mountApp();
+    expect(wrapper.find(".v-navigation-drawer .v-chip").exists()).toBe(false);
+
+    listPublications.mockResolvedValue({ count: 1, results: [] });
+    stations().vm.$emit("changed");
+    await flushPromises();
+
+    expect(navItem("Publishing1")).toBeTruthy();
+  });
+
+  it("keeps the newest count when an older answer arrives last", async () => {
+    await mountApp();
+    let answerOlder;
+    listPublications.mockReturnValueOnce(new Promise((resolve) => (answerOlder = resolve)));
+    stations().vm.$emit("changed");
+    listPublications.mockResolvedValueOnce({ count: 1, results: [] });
+    stations().vm.$emit("changed");
+    await flushPromises();
+
+    answerOlder({ count: 0, results: [] });
     await flushPromises();
 
     expect(navItem("Publishing1")).toBeTruthy();

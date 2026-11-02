@@ -29,10 +29,14 @@ const navOpen = ref(null);
 const FAILURES_REFRESH_MS = 30000;
 const failures = ref(0);
 let failuresTimer = null;
+let failuresRequests = 0;
 
 async function refreshFailures() {
+  const request = ++failuresRequests;
   try {
-    failures.value = (await listPublications({ attention: 1, limit: 1 })).count;
+    const { count } = await listPublications({ attention: 1, limit: 1 });
+    // A slower, older answer must not replace a newer one.
+    if (request === failuresRequests) failures.value = count;
   } catch {
     // keeps the last number: the rest of the app works without it
   }
@@ -107,6 +111,7 @@ async function handleLogout() {
             @new="view = { mode: 'new' }"
             @edit="(stationId) => (view = { mode: 'edit', stationId })"
             @batch="(stationIds) => (view = { mode: 'batch', stationIds })"
+            @changed="refreshFailures"
           />
           <WmdrForm
             v-else-if="view.mode === 'new' || view.mode === 'edit'"

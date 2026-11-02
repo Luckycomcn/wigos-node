@@ -8,7 +8,7 @@ import SelectionBar from "./SelectionBar.vue";
 // `selected` (a Set of station IDs) is kept by the parent so it survives a
 // trip to the batch wizard and back.
 const selected = defineModel("selected", { type: Set, required: true });
-const emit = defineEmits(["new", "edit", "batch"]);
+const emit = defineEmits(["new", "edit", "batch", "changed"]);
 
 const HEADERS = [
   { title: "WIGOS identifier", key: "wsi" },
@@ -41,6 +41,7 @@ async function loadLatest() {
     const data = await listLatestPublications();
     if (left) return;
     latest.value = data;
+    emit("changed");
   } catch {
     return; // the list works without the chips
   }

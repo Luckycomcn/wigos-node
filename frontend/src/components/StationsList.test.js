@@ -80,6 +80,17 @@ describe("StationsList publishing status", () => {
     expect(listLatestPublications).toHaveBeenCalledTimes(2);
   });
 
+  it("tells the app each time it has new statuses, so a failure reaches the counter", async () => {
+    vi.useFakeTimers();
+    listLatestPublications.mockResolvedValue({ 1: { id: 9, status: "pending", finished_at: null } });
+    await mountList();
+    expect(wrapper.emitted("changed")).toHaveLength(1);
+
+    listLatestPublications.mockResolvedValue({ 1: { id: 9, status: "failed", finished_at: null } });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(wrapper.emitted("changed")).toHaveLength(2);
+  });
+
   it("stops following when leaving the page", async () => {
     vi.useFakeTimers();
     listLatestPublications.mockResolvedValue({ 1: { id: 9, status: "pending", finished_at: null } });
