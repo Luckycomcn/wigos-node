@@ -8,12 +8,19 @@ from .test_base import CreatesOnlyPublisher, EchoGenerator, RecordingTransport, 
 HERE = "publishing.tests.test_base"
 
 
-def config(name="echo", **fields):
+def step(name="main", **fields):
     values = {
         "NAME": name,
         "GENERATOR": {"CLASS": f"{HERE}.EchoGenerator"},
         "TRANSPORT": {"CLASS": f"{HERE}.RecordingTransport", "OPTIONS": {"topic": "a/b"}},
     }
+    values.update(fields)
+    return values
+
+
+def config(name="echo", GENERATOR=None, TRANSPORT=None, **fields):
+    plugins = {k: v for k, v in (("GENERATOR", GENERATOR), ("TRANSPORT", TRANSPORT)) if v is not None}
+    values = {"NAME": name, "STEPS": [step(**plugins)]}
     values.update(fields)
     return values
 
@@ -31,14 +38,32 @@ class BuildPublishersTestCase(unittest.TestCase):
         self.assertEqual([p.name for p in publishers], ["first", "second"])
         self.assertIsInstance(publishers[0], DefaultPublisher)
         self.assertIsInstance(publishers[1], CreatesOnlyPublisher)
-        self.assertIsInstance(publishers[0].generator, EchoGenerator)
-        self.assertIsInstance(publishers[0].transport, RecordingTransport)
-        self.assertEqual(publishers[0].transport.options, {"topic": "a/b"})
+        self.assertIsInstance(publishers[0].steps[0].generator, EchoGenerator)
+        self.assertIsInstance(publishers[0].steps[0].transport, RecordingTransport)
+        self.assertEqual(publishers[0].steps[0].transport.options, {"topic": "a/b"})
+
+    def test_builds_the_steps_of_a_publisher_in_order(self):
+        [publisher] = build_publishers([config(STEPS=[step("first"), step("second")])])
+        self.assertEqual([s.name for s in publisher.steps], ["first", "second"])
+
+    def test_disabled_steps_are_skipped_without_importing(self):
+        off = step("off", ENABLED=False, TRANSPORT={"CLASS": "not_installed.Transport"})
+        [publisher] = build_publishers([config(STEPS=[step(), off])])
+        self.assertEqual([s.name for s in publisher.steps], ["main"])
+
+    def test_a_publisher_with_every_step_disabled_is_skipped(self):
+        self.assertEqual(build_publishers([config(STEPS=[step(ENABLED=False)])]), [])
+
+    def test_bad_steps(self):
+        self.assertErrors([config(STEPS=[])], "'echo': STEPS must be a non-empty list")
+        self.assertErrors([{"NAME": "echo"}], "'echo': STEPS must be a non-empty list")
+        self.assertErrors([config(STEPS=[step("")])], "'echo' step 0: NAME is required")
+        self.assertErrors([config(STEPS=[step(), step()])], "'echo' step 'main': NAME is used more than once")
 
     def test_built_publisher_publishes(self):
         [publisher] = build_publishers([config()])
-        publisher.publish(make_event(), [])
-        self.assertEqual([m.body for m in publisher.transport.sent], [b"create"])
+        publisher.publish(make_event())
+        self.assertEqual([m.body for m in publisher.steps[0].transport.sent], [b"create"])
 
     def test_empty_config_builds_nothing(self):
         self.assertEqual(build_publishers([]), [])
@@ -87,6 +112,6 @@ class BuildPublishersTestCase(unittest.TestCase):
     def test_every_problem_is_reported(self):
         self.assertErrors(
             [config(TRANSPORT={}), config("other", GENERATOR={"CLASS": "nowhere.Generator"})],
-            "'echo' TRANSPORT: CLASS is required",
-            "'other' GENERATOR: cannot import",
+            "'echo' step 'main' TRANSPORT: CLASS is required",
+            "'other' step 'main' GENERATOR: cannot import",
         )

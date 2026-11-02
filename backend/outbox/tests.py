@@ -25,6 +25,7 @@ from publishing.base import (
     MessageGenerator,
     Operation,
     PublishError,
+    Step,
     TransportLayer,
 )
 from publishing.generators.wmdr2 import RecordFileGenerator
@@ -227,16 +228,21 @@ class QueueOnStationChangeTestCase(APITestCase):
 
 LOG = "publishing.transports.log.LogTransport"
 BROKEN = [
-    {"NAME": "files", "GENERATOR": {"CLASS": "publishing.generators.wmdr2.RecordFileGenerator"}, "TRANSPORT": {"CLASS": LOG}},
-    {"NAME": "files", "GENERATOR": {"CLASS": "nowhere.Generator"}, "TRANSPORT": {"CLASS": LOG}},
+    {"NAME": "files", "STEPS": [
+        {"NAME": "store", "GENERATOR": {"CLASS": "publishing.generators.wmdr2.RecordFileGenerator"}, "TRANSPORT": {"CLASS": LOG}},
+    ]},
+    {"NAME": "files", "STEPS": [
+        {"NAME": "store", "GENERATOR": {"CLASS": "nowhere.Generator"}, "TRANSPORT": {"CLASS": LOG}},
+    ]},
 ]
 
 
 class PublishersSettingTestCase(SimpleTestCase):
     def test_configured_publishers_build(self):
         self.assertEqual(check_publishers(None), [])
-        storage, wnm = get_publishers()
-        self.assertEqual((storage.name, wnm.name), ("wis2-storage", "wis2-wnm"))
+        [publisher] = get_publishers()
+        storage, wnm = publisher.steps
+        self.assertEqual((publisher.name, storage.name, wnm.name), ("wis2", "storage", "wnm"))
         self.assertIsInstance(storage.generator, RecordFileGenerator)
         self.assertIsInstance(storage.transport, S3Transport)
         self.assertIsInstance(wnm.generator, WNMGenerator)
@@ -333,8 +339,14 @@ class WorkerTestCase(TestCase):
         self.storage = MemoryStorage()
         self.broker = MemoryBroker()
         self.publishers = [
-            DefaultPublisher("files", RecordFileGenerator(centre_id="io-test"), self.storage),
-            MemoryRetrievalPublisher("wnm", WNMGenerator(centre_id="io-test"), self.broker, storage=self.storage),
+            MemoryRetrievalPublisher(
+                "wis2",
+                [
+                    Step("storage", RecordFileGenerator(centre_id="io-test"), self.storage),
+                    Step("wnm", WNMGenerator(centre_id="io-test"), self.broker),
+                ],
+                storage=self.storage,
+            ),
         ]
 
     def process_due(self):
@@ -348,13 +360,13 @@ class WorkerTestCase(TestCase):
 
         row.refresh_from_db()
         self.assertEqual(row.status, PublicationEvent.Status.PROCESSED)
-        self.assertEqual(row.completed, ["files", "wnm"])
+        self.assertEqual(row.completed, ["wis2:storage", "wis2:wnm"])
         self.assertIsNotNone(row.finished_at)
         url = row.deliveries[0]["url"]
         self.assertEqual(row.deliveries, [
-            {"publisher": "files", "name": url.removeprefix("mem://store/"), "media_type": "application/geo+json",
+            {"publisher": "wis2", "step": "storage", "name": url.removeprefix("mem://store/"), "media_type": "application/geo+json",
              "topic": None, "url": url, "internal_url": None},
-            {"publisher": "wnm", "name": None, "media_type": "application/geo+json",
+            {"publisher": "wis2", "step": "wnm", "name": None, "media_type": "application/geo+json",
              "topic": None, "url": None, "internal_url": None},
         ])
         [wnm] = self.broker.sent
@@ -372,7 +384,7 @@ class WorkerTestCase(TestCase):
             worker.process_next(self.publishers)
 
         row.refresh_from_db()
-        self.assertEqual((row.status, row.attempts, row.completed), (PublicationEvent.Status.PENDING, 1, ["files"]))
+        self.assertEqual((row.status, row.attempts, row.completed), (PublicationEvent.Status.PENDING, 1, ["wis2:storage"]))
         self.assertIn("wnm: broker down", row.last_error)
         self.assertGreater(row.next_attempt_at, timezone.now())
         self.assertFalse(worker.process_next(self.publishers))  # not due yet
@@ -414,21 +426,87 @@ class WorkerTestCase(TestCase):
 
         row.refresh_from_db()
         self.assertEqual(row.status, PublicationEvent.Status.FAILED)
-        self.assertIn("undo files: storage down", row.last_error)
-        self.assertEqual(row.completed, ["files"])  # the file may still be stored
-        self.assertEqual([d["publisher"] for d in row.deliveries], ["files"])
+        self.assertIn("undo wis2: storage down", row.last_error)
+        self.assertTrue(row.needs_cleanup)
+        self.assertEqual(row.completed, ["wis2:storage"])  # the file may still be stored
+        self.assertEqual([d["step"] for d in row.deliveries], ["storage"])
         self.assertEqual(len(self.storage.files), 1)
 
     def test_a_crashing_plugin_fails_the_event(self):
         row = make_row(ordering_keys=KEYS)
-        publishers = [DefaultPublisher("broken", BrokenGenerator(), self.broker)]
+        publishers = [DefaultPublisher("broken", [Step("main", BrokenGenerator(), self.broker)])]
 
         with self.assertLogs("outbox", "WARNING"):
             worker.process_next(publishers)
 
         row.refresh_from_db()
         self.assertEqual((row.status, row.attempts), (PublicationEvent.Status.FAILED, 1))
-        self.assertIn("broken: boom", row.last_error)
+        self.assertIn("broken:main: boom", row.last_error)
+
+    def independent_publishers(self):
+        """A working publisher next to the WIS2 one, each with its own storage."""
+        self.other = MemoryBroker()
+        return [DefaultPublisher("other", [Step("note", EventIdGenerator(), self.other)])] + self.publishers
+
+    def test_a_failing_publisher_doesnt_affect_the_others(self):
+        row = make_row(ordering_keys=KEYS)
+        self.broker.failures = 1
+
+        with self.assertLogs("outbox", "ERROR"):
+            worker.process_next(self.independent_publishers())
+
+        row.refresh_from_db()
+        self.assertEqual(row.status, PublicationEvent.Status.FAILED)
+        self.assertIn("wis2:wnm: broker down", row.last_error)
+        self.assertEqual(row.completed, ["other:note"])  # delivered, so not undone
+        self.assertEqual([d["publisher"] for d in row.deliveries], ["other"])
+        self.assertEqual(len(self.other.sent), 1)
+        self.assertEqual(self.storage.files, {})  # wis2 undid its own steps
+        self.assertFalse(row.needs_cleanup)
+
+    def test_later_publishers_still_run_after_one_fails(self):
+        row = make_row(ordering_keys=KEYS)
+        self.broker.failures = 1
+
+        with self.assertLogs("outbox", "ERROR"):
+            worker.process_next(list(reversed(self.independent_publishers())))
+
+        row.refresh_from_db()
+        self.assertEqual((row.status, row.completed), (PublicationEvent.Status.FAILED, ["other:note"]))
+
+    def test_a_failed_event_with_a_working_publisher_releases_its_station(self):
+        make_row(ordering_keys=KEYS)
+        later = make_row(ordering_keys=KEYS)
+        self.broker.failures = 1
+
+        with self.assertLogs("outbox", "ERROR"):
+            worker.process_next(self.independent_publishers())
+
+        self.assertEqual(worker.claim(), later)
+
+    @mock.patch.object(worker, "MAX_ATTEMPTS", 5)  # with automatic retries turned on
+    def test_a_retry_only_runs_the_publisher_that_failed(self):
+        row = make_row(ordering_keys=KEYS)
+        self.broker.failures = 1
+        publishers = self.independent_publishers()
+
+        with self.assertLogs("outbox", "WARNING"):
+            worker.process_next(publishers)
+        self.process_due_with(publishers)
+
+        row.refresh_from_db()
+        self.assertEqual(row.status, PublicationEvent.Status.PROCESSED)
+        self.assertEqual(len(self.other.sent), 1)  # not sent again
+        self.assertEqual(len(self.broker.sent), 1)
+
+    def process_due_with(self, publishers):
+        PublicationEvent.objects.filter(status=PublicationEvent.Status.PENDING).update(next_attempt_at=None)
+        return worker.process_next(publishers)
+
+    def test_a_publisher_no_longer_configured_doesnt_hold_the_station(self):
+        make_row(ordering_keys=KEYS, status=PublicationEvent.Status.FAILED, completed=["gone:step"])
+        later = make_row(ordering_keys=KEYS)
+        self.assertEqual(worker.claim(), later)
 
     def test_deletion_links_to_the_last_processed_file_and_keeps_it(self):
         create = make_row(operation=Operation.CREATE, ordering_keys=KEYS)
@@ -442,7 +520,7 @@ class WorkerTestCase(TestCase):
         self.assertEqual(deletion.status, PublicationEvent.Status.PROCESSED)
         link = self.broker.sent[1]["links"][0]
         self.assertEqual((link["href"], link["rel"]), (create.deliveries[0]["url"], "deletion"))
-        self.assertEqual([d["publisher"] for d in deletion.deliveries], ["wnm"])  # the file is create's
+        self.assertEqual([d["step"] for d in deletion.deliveries], ["wnm"])  # the file is create's
         self.assertEqual(self.storage.puts, 1)
         self.assertIn(create.deliveries[0]["url"], self.storage.files)
 
@@ -475,7 +553,7 @@ class WorkerTestCase(TestCase):
         self.assertEqual(worker.claim(), later)
 
     def test_a_failed_event_with_leftovers_holds_back_its_station(self):
-        make_row(ordering_keys=["station:1"], status=PublicationEvent.Status.FAILED, completed=["files"])
+        make_row(ordering_keys=["station:1"], status=PublicationEvent.Status.FAILED, needs_cleanup=True)
         make_row(ordering_keys=["station:1"])
         self.assertIsNone(worker.claim())
 
@@ -521,9 +599,10 @@ class WorkerTestCase(TestCase):
 
     def store_record_file(self, row):
         """As if the storage publisher ran before the worker crashed."""
-        [delivery] = self.publishers[0].publish(row.to_event(), [])
+        publisher = self.publishers[0]
+        [delivery] = publisher.run_step(publisher.steps[0], row.to_event(), [])
         PublicationEvent.objects.filter(pk=row.pk).update(
-            completed=["files"], deliveries=[worker.dump_delivery(delivery)]
+            completed=["wis2:storage"], deliveries=[worker.dump_delivery(delivery)]
         )
 
     def crashed_row(self, attempts):
@@ -620,7 +699,7 @@ class ParallelWorkerTestCase(TransactionTestCase):
         make_row(ordering_keys=["station:1", "wsi:a"])
         make_row(ordering_keys=["station:2", "wsi:b"])
 
-        worker.run([DefaultPublisher("together", EventIdGenerator(), TogetherTransport())], once=True, workers=2)
+        worker.run([DefaultPublisher("together", [Step("main", EventIdGenerator(), TogetherTransport())])], once=True, workers=2)
 
         self.assertEqual(self.statuses(), {PublicationEvent.Status.PROCESSED})
 
@@ -632,7 +711,7 @@ class ParallelWorkerTestCase(TransactionTestCase):
         ]
         transport = OverlapTransport()
 
-        worker.run([DefaultPublisher("slow", EventIdGenerator(), transport)], once=True, workers=3)
+        worker.run([DefaultPublisher("slow", [Step("main", EventIdGenerator(), transport)])], once=True, workers=3)
 
         self.assertEqual(self.statuses(), {PublicationEvent.Status.PROCESSED})
         self.assertEqual(transport.most_active, 1)
@@ -640,8 +719,10 @@ class ParallelWorkerTestCase(TransactionTestCase):
         self.assertEqual((transport.opened, transport.closed), (1, 1))  # shared by the threads
 
     @override_settings(PUBLISHERS=[
-        {"NAME": "files", "GENERATOR": {"CLASS": "publishing.generators.wmdr2.RecordFileGenerator",
-                                        "OPTIONS": {"centre_id": "io-test"}}, "TRANSPORT": {"CLASS": LOG}},
+        {"NAME": "files", "STEPS": [
+            {"NAME": "store", "GENERATOR": {"CLASS": "publishing.generators.wmdr2.RecordFileGenerator",
+                                            "OPTIONS": {"centre_id": "io-test"}}, "TRANSPORT": {"CLASS": LOG}},
+        ]},
     ])  # no storage in the tests
     def test_run_once_processes_the_queue_with_the_configured_publishers(self):
         make_row(operation=Operation.CREATE, ordering_keys=["station:1"])
@@ -707,7 +788,7 @@ class NotifyTestCase(TransactionTestCase):
 
     def test_the_running_worker_publishes_a_change_right_away(self):
         transport = OverlapTransport()
-        finish = self.start(worker.run, [DefaultPublisher("slow", EventIdGenerator(), transport)], workers=2)
+        finish = self.start(worker.run, [DefaultPublisher("slow", [Step("main", EventIdGenerator(), transport)])], workers=2)
 
         row = queue_and_notify()
         for _ in range(50):

@@ -67,8 +67,11 @@ class RecordFileGeneratorTestCase(unittest.TestCase):
             build_publishers([
                 {
                     "NAME": "files",
-                    "GENERATOR": {"CLASS": "publishing.generators.wmdr2.RecordFileGenerator"},
-                    "TRANSPORT": {"CLASS": "publishing.transports.log.LogTransport"},
+                    "STEPS": [{
+                        "NAME": "store",
+                        "GENERATOR": {"CLASS": "publishing.generators.wmdr2.RecordFileGenerator"},
+                        "TRANSPORT": {"CLASS": "publishing.transports.log.LogTransport"},
+                    }],
                 }
             ])
         self.assertIn("centre_id", caught.exception.errors[0])

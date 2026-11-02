@@ -5,7 +5,7 @@ import unittest
 import uuid
 from datetime import datetime, timezone
 
-from publishing.base import DefaultPublisher, Delivery, Location, Message, Operation, PublishError
+from publishing.base import Delivery, Location, Message, Operation, PublishError, Step
 from publishing.generators.wmdr2 import RecordFileGenerator
 from publishing.generators.wnm import (
     MAX_INLINE_CONTENT_SIZE,
@@ -13,7 +13,7 @@ from publishing.generators.wnm import (
     WNMGenerator,
     create_wnm,
 )
-from publishing.wmdr2 import render_record
+from publishing.wmdr2 import record_file_name, render_record
 
 from .test_base import FakeRetrievalPublisher, RecordingTransport, make_event
 
@@ -154,23 +154,23 @@ class WNMGeneratorTestCase(unittest.TestCase):
 
 
 class StorageThenWnmTestCase(unittest.TestCase):
-    """The two publishers as configured: the WNM describes what storage
-    serves, even when that differs from what was uploaded."""
+    """The steps as configured: the WNM describes what storage serves, even
+    when that differs from what was uploaded."""
 
     def test_integrity_comes_from_the_retrieved_file(self):
-        storage = DefaultPublisher(
-            "wis2-storage", RecordFileGenerator(centre_id="io-test"), RecordingTransport(url="http://store")
-        )
-        event = make_event(Operation.CREATE, wmdrv2=RECORD)
-        receipts = storage.publish(event, [])
-        url = receipts[0].location.url
-
+        url = f"http://store/{record_file_name(RECORD, 'io-test')}"
         served = CONTENT + b"\n"  # e.g. a storage that appends a newline
         notifications = RecordingTransport()
-        wnm_publisher = FakeRetrievalPublisher(
-            "wis2-wnm", WNMGenerator(centre_id="io-test"), notifications, files={url: served}
+        publisher = FakeRetrievalPublisher(
+            "wis2",
+            [
+                Step("storage", RecordFileGenerator(centre_id="io-test"), RecordingTransport(url="http://store")),
+                Step("wnm", WNMGenerator(centre_id="io-test"), notifications),
+            ],
+            files={url: served},
         )
-        wnm_publisher.publish(event, receipts)
+
+        publisher.publish(make_event(Operation.CREATE, wmdrv2=RECORD))
 
         [wnm] = [json.loads(m.body) for m in notifications.sent]
         self.assertEqual(wnm["links"][0]["href"], url)

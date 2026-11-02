@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest import mock
 
 from publishing.base import (
     DefaultPublisher,
@@ -13,8 +14,13 @@ from publishing.base import (
     Operation,
     Publisher,
     PublishError,
+    Step,
     TransportLayer,
 )
+
+
+def one_step(generator, transport, name="main"):
+    return [Step(name, generator, transport)]
 
 
 def make_event(operation=Operation.CREATE, **fields):
@@ -99,7 +105,7 @@ class FakeRetrievalPublisher(DefaultPublisher):
 class PublisherTestCase(unittest.TestCase):
     def setUp(self):
         self.transport = RecordingTransport()
-        self.publisher = DefaultPublisher("echo", EchoGenerator(), self.transport)
+        self.publisher = DefaultPublisher("echo", one_step(EchoGenerator(), self.transport))
 
     def test_publish_sends_generated_messages(self):
         self.publisher.publish(make_event(Operation.UPDATE), [])
@@ -111,7 +117,7 @@ class PublisherTestCase(unittest.TestCase):
         self.assertEqual(self.transport.sent, [])
 
     def test_should_publish_filters_events(self):
-        publisher = CreatesOnlyPublisher("creates", EchoGenerator(), self.transport)
+        publisher = CreatesOnlyPublisher("creates", one_step(EchoGenerator(), self.transport))
         self.assertEqual(publisher.publish(make_event(Operation.UPDATE), []), [])
         publisher.publish(make_event(Operation.CREATE), [])
         self.assertEqual([m.body for m in self.transport.sent], [b"create"])
@@ -140,7 +146,7 @@ class PublisherTestCase(unittest.TestCase):
 
 class DeliveryTestCase(unittest.TestCase):
     def test_publish_returns_receipts_with_locations(self):
-        publisher = DefaultPublisher("files", EchoGenerator(), RecordingTransport(url="http://store"))
+        publisher = DefaultPublisher("files", one_step(EchoGenerator(), RecordingTransport(url="http://store")))
         [delivery] = publisher.publish(make_event(), [])
         self.assertEqual(delivery.publisher, "files")
         self.assertEqual(delivery.message.body, b"create")
@@ -148,7 +154,7 @@ class DeliveryTestCase(unittest.TestCase):
         self.assertIsNone(delivery.content)
 
     def test_notification_receipts_have_no_location(self):
-        [delivery] = DefaultPublisher("note", EchoGenerator(), RecordingTransport()).publish(make_event(), [])
+        [delivery] = DefaultPublisher("note", one_step(EchoGenerator(), RecordingTransport())).publish(make_event(), [])
         self.assertIsNone(delivery.location)
 
     def test_generator_gets_the_retrieved_file_not_the_sent_body(self):
@@ -159,15 +165,15 @@ class DeliveryTestCase(unittest.TestCase):
         ]
         generator = ContentGenerator()
         publisher = FakeRetrievalPublisher(
-            "check", generator, RecordingTransport(), files={"http://internal/f": b"as stored"}
+            "check", one_step(generator, RecordingTransport()), files={"http://internal/f": b"as stored"}
         )
         publisher.publish(make_event(), earlier)
         self.assertEqual(publisher.retrieved, ["http://internal/f"])
         self.assertEqual([d.content for d in generator.seen], [b"as stored", None])
-        self.assertEqual([m.body for m in publisher.transport.sent], [b"as stored"])
+        self.assertEqual([m.body for m in publisher.steps[0].transport.sent], [b"as stored"])
 
     def test_nothing_is_retrieved_unless_needed(self):
-        publisher = FakeRetrievalPublisher("echo", EchoGenerator(), RecordingTransport(), files={})
+        publisher = FakeRetrievalPublisher("echo", one_step(EchoGenerator(), RecordingTransport()), files={})
         publisher.publish(make_event(), [Delivery("files", Message(b"x", "text/plain"), Location("http://f"))])
         self.assertEqual(publisher.retrieved, [])
 
@@ -177,18 +183,18 @@ class DeliveryTestCase(unittest.TestCase):
             path.write_bytes(b'{"stored":true}')
             location = Location("https://public.example/record.json", path.as_uri())
             self.assertEqual(Location("u").retrieve_url, "u")
-            publisher = DefaultPublisher("check", ContentGenerator(), RecordingTransport())
+            publisher = DefaultPublisher("check", one_step(ContentGenerator(), RecordingTransport()))
             self.assertEqual(publisher.retrieve(location), b'{"stored":true}')
 
     def test_undo_removes_only_this_publishers_stored_deliveries_newest_first(self):
         transport = RecordingTransport()
-        publisher = DefaultPublisher("files", EchoGenerator(), transport)
+        publisher = DefaultPublisher("files", one_step(EchoGenerator(), transport))
         body = Message(b"x", "text/plain")
         publisher.undo(make_event(), [
-            Delivery("files", body, Location("http://store/a")),
-            Delivery("other", body, Location("http://store/other")),
-            Delivery("files", body),  # nothing stored
-            Delivery("files", body, Location("http://store/b")),
+            Delivery("files", body, Location("http://store/a"), step="main"),
+            Delivery("other", body, Location("http://store/other"), step="main"),
+            Delivery("files", body, step="main"),  # nothing stored
+            Delivery("files", body, Location("http://store/b"), step="main"),
         ])
         self.assertEqual(transport.removed, ["http://store/b", "http://store/a"])
 
@@ -197,21 +203,91 @@ class DeliveryTestCase(unittest.TestCase):
             def send(self, message):
                 return None
 
-        publisher = DefaultPublisher("note", EchoGenerator(), NotificationTransport())
-        publisher.undo(make_event(), [Delivery("note", Message(b"x", "text/plain"), Location("http://x"))])
+        publisher = DefaultPublisher("note", one_step(EchoGenerator(), NotificationTransport()))
+        publisher.undo(make_event(), [Delivery("note", Message(b"x", "text/plain"), Location("http://x"), step="main")])
 
     def test_undo_errors_reach_the_caller(self):
         class BrokenRemove(RecordingTransport):
             def remove(self, location):
                 raise PublishError("storage down")
 
-        publisher = DefaultPublisher("files", EchoGenerator(), BrokenRemove())
+        publisher = DefaultPublisher("files", one_step(EchoGenerator(), BrokenRemove()))
         with self.assertRaises(PublishError):
-            publisher.undo(make_event(), [Delivery("files", Message(b"x", "text/plain"), Location("http://x"))])
+            publisher.undo(make_event(), [Delivery("files", Message(b"x", "text/plain"), Location("http://x"), step="main")])
 
     def test_failed_retrieval_raises_publish_error(self):
-        publisher = DefaultPublisher("check", ContentGenerator(), RecordingTransport())
+        publisher = DefaultPublisher("check", one_step(ContentGenerator(), RecordingTransport()))
         with self.assertRaises(PublishError):
             publisher.retrieve(Location("file:///nonexistent/record.json"))
         with self.assertRaises(PublishError):
             publisher.retrieve(Location("not a url"))
+
+
+class StepsTestCase(unittest.TestCase):
+    """A publisher pipes its own steps, from start to end."""
+
+    def setUp(self):
+        self.storage = RecordingTransport(url="http://store")
+        self.notes = RecordingTransport()
+        self.generator = ContentGenerator()
+        self.publisher = FakeRetrievalPublisher(
+            "pipe",
+            [Step("store", EchoGenerator(), self.storage), Step("note", self.generator, self.notes)],
+            files={"http://store/0-20000-0-12345": b"as stored"},
+        )
+
+    def test_each_step_gets_the_receipts_of_the_steps_before_it(self):
+        store, note = self.publisher.publish(make_event())
+        self.assertEqual((store.publisher, store.step), ("pipe", "store"))
+        self.assertEqual((note.publisher, note.step), ("pipe", "note"))
+        self.assertEqual([m.body for m in self.notes.sent], [b"as stored"])
+
+    def test_open_and_close_reach_every_transport(self):
+        self.publisher.open()
+        self.publisher.close()
+        self.assertTrue(self.storage.opened and self.storage.closed and self.notes.opened and self.notes.closed)
+
+    def test_steps_already_done_are_skipped_and_their_receipts_reused(self):
+        store, _ = self.publisher.publish(make_event())
+        self.storage.sent.clear()
+        self.notes.sent.clear()
+
+        self.publisher.publish(make_event(), [store], done=["store"])
+
+        self.assertEqual(self.storage.sent, [])
+        self.assertEqual([m.body for m in self.notes.sent], [b"as stored"])
+
+    def test_on_step_reports_the_progress_after_each_step(self):
+        seen = []
+        self.publisher.publish(make_event(), on_step=lambda step, receipts: seen.append((step.name, len(receipts))))
+        self.assertEqual(seen, [("store", 1), ("note", 2)])
+
+    def test_a_failing_step_stops_the_later_ones(self):
+        self.publisher.retrieve = mock.Mock(side_effect=PublishError("storage down"))
+        with self.assertRaises(PublishError):
+            self.publisher.publish(make_event())
+        self.assertEqual(self.notes.sent, [])
+
+    def test_only_a_deletion_is_given_the_previous_receipts(self):
+        previous = [Delivery("pipe", Message(b"", "text/plain"), Location("http://store/old"), step="store")]
+        self.publisher.files["http://store/old"] = b"old"
+
+        self.publisher.publish(make_event(Operation.DELETE), previous=previous)
+        self.assertEqual([d.location.url for d in self.generator.seen], ["http://store/old"])
+
+        self.publisher.publish(make_event(Operation.UPDATE), previous=previous)
+        self.assertNotIn("http://store/old", [d.location.url for d in self.generator.seen])
+
+    def test_undo_uses_the_transport_of_the_step_that_stored_it(self):
+        other = RecordingTransport()
+        publisher = DefaultPublisher("pipe", [Step("a", EchoGenerator(), self.storage), Step("b", EchoGenerator(), other)])
+        body = Message(b"x", "text/plain")
+        publisher.undo(make_event(), [
+            Delivery("pipe", body, Location("http://a"), step="a"),
+            Delivery("pipe", body, Location("http://b"), step="b"),
+        ])
+        self.assertEqual((self.storage.removed, other.removed), (["http://a"], ["http://b"]))
+
+    def test_undo_of_an_unknown_step_is_an_error(self):
+        with self.assertRaises(KeyError):  # recorded by the worker
+            self.publisher.undo(make_event(), [Delivery("pipe", Message(b"x", "t"), Location("http://a"), step="gone")])

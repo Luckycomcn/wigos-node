@@ -96,10 +96,13 @@ class MQTTTransportTestCase(unittest.TestCase):
         with self.assertRaises(ConfigurationError) as caught:
             build_publishers([{
                 "NAME": "wnm",
-                "GENERATOR": {"CLASS": "publishing.generators.wmdr2.RecordFileGenerator",
-                              "OPTIONS": {"centre_id": "c"}},
-                "TRANSPORT": {"CLASS": "publishing.transports.mqtt.MQTTTransport",
-                              "OPTIONS": {"url": "http://user:secret@broker"}},
+                "STEPS": [{
+                    "NAME": "send",
+                    "GENERATOR": {"CLASS": "publishing.generators.wmdr2.RecordFileGenerator",
+                                  "OPTIONS": {"centre_id": "c"}},
+                    "TRANSPORT": {"CLASS": "publishing.transports.mqtt.MQTTTransport",
+                                  "OPTIONS": {"url": "http://user:secret@broker"}},
+                }],
             }])
         self.assertIn("url must look like", caught.exception.errors[0])
         self.assertNotIn("secret", caught.exception.errors[0])

@@ -7,16 +7,16 @@ Events are processed in parallel threads (settings.PUBLISHING_WORKERS),
 oldest first. An event waits while an older event that still holds its
 resources shares one of its ordering keys (same station, or a WIGOS
 identifier it had or has), so a station's changes are published in order.
-A failed event stays in the log but releases its keys once it is cleaned up
-(everything undone); one whose undo failed keeps holding them.
+A failed event stays in the log but releases its keys, unless its undo failed
+(`needs_cleanup`): that one keeps holding them.
 
-Publishers run in order for each event, and each one gets the receipts of
-the ones before it. After every publisher the row records it in `completed`
-with its receipts. When an event runs out of attempts (see MAX_ATTEMPTS) it
-becomes `failed` and its completed publishers are undone, newest first.
+Each publisher is one process from start to end, and they don't affect each
+other. After every step of a publisher the row records it in `completed` with
+its receipts. When an event runs out of attempts (see MAX_ATTEMPTS) it becomes
+`failed` and the publishers that failed are undone.
 
 A claimed event is `processing` with a lease (`locked_until`), renewed after
-every publisher. A worker that dies leaves the lease to expire; the event
+every step. A worker that dies leaves the lease to expire; the event
 is then claimed again and resumes after its completed publishers. A single
 publisher must therefore finish within LEASE. Every time the worker sets or
 compares comes from the database clock, so workers on hosts whose clocks
@@ -33,7 +33,7 @@ from django.conf import settings
 from django.db import DatabaseError, close_old_connections, connection, transaction
 from django.db.models import Exists, OuterRef, Q
 
-from publishing.base import Delivery, Location, Message, Operation, PublishError
+from publishing.base import Delivery, Location, Message, PublishError
 
 from .models import PublicationEvent
 
@@ -52,7 +52,7 @@ CHANNEL = "publishing"  # NOTIFY channel; the payload is the event id
 Status = PublicationEvent.Status
 FINISHED = [Status.PROCESSED, Status.PUBLISHED]
 # events that no longer hold back the events after them
-RELEASED = Q(status__in=FINISHED) | Q(status=Status.FAILED, completed__len=0)
+RELEASED = Q(status__in=FINISHED) | Q(status=Status.FAILED, needs_cleanup=False)
 
 
 class LeaseLost(Exception):
@@ -65,6 +65,7 @@ def dump_delivery(delivery):
     location = delivery.location
     return {
         "publisher": delivery.publisher,
+        "step": delivery.step,
         "name": delivery.message.name,
         "media_type": delivery.message.media_type,
         "topic": delivery.message.topic,
@@ -78,6 +79,7 @@ def load_delivery(data):
         publisher=data["publisher"],
         message=Message(body=b"", media_type=data["media_type"], name=data["name"], topic=data["topic"]),
         location=Location(data["url"], data["internal_url"]) if data["url"] else None,
+        step=data.get("step"),
     )
 
 
@@ -95,8 +97,8 @@ def retry_delay(attempts):
 
 def claim():
     """Take the oldest claimable event: pending and due, or processing with
-    an expired lease (its worker crashed, so it resumes). Events behind an older unreleased event sharing an ordering key are
-    skipped. Returns the event, now processing under a new lease, or None."""
+    an expired lease (its worker crashed, so it resumes). Events behind an
+    older unreleased event sharing an ordering key are skipped. Returns the event, now processing under a new lease, or None."""
     now = db_now()
     blocking = PublicationEvent.objects.filter(
         id__lt=OuterRef("id"),
@@ -135,39 +137,74 @@ def save(row, *fields):
     row.locked_until = lease
 
 
-def earlier_deliveries(row):
-    """What a DELETE refers to: the receipts of the station's last finished
-    event (the deletion WNM links to that file). Nothing for other events.
-    These belong to that event, so they are never saved here or undone."""
-    if row.operation != Operation.DELETE:
-        return []
+def receipts_of(row, publisher):
+    return [load_delivery(d) for d in row.deliveries if d["publisher"] == publisher.name]
+
+
+def previous_deliveries(row, publisher):
+    """This publisher's receipts from the station's last change it delivered
+    (a deletion WNM links to that file). They belong to that event, so they
+    are never saved here or undone."""
     last = (
-        PublicationEvent.objects.filter(station_id=row.station_id, status__in=FINISHED, id__lt=row.id)
+        PublicationEvent.objects.filter(
+            station_id=row.station_id,
+            id__lt=row.id,
+            deliveries__contains=[{"publisher": publisher.name}],
+            needs_cleanup=False,
+        )
         .order_by("-id")
         .first()
     )
-    return [load_delivery(d) for d in last.deliveries] if last else []
+    return receipts_of(last, publisher) if last else []
+
+
+def step_key(publisher, step_name):
+    """How a publisher's step is recorded in `completed`."""
+    return f"{publisher.name}:{step_name}"
+
+
+def run_publisher(row, publisher, event):
+    """Run one publisher, saving its progress after every step."""
+    prefix = step_key(publisher, "")
+
+    def record(step, receipts):
+        row.completed.append(step_key(publisher, step.name))
+        others = [d for d in row.deliveries if d["publisher"] != publisher.name]
+        row.deliveries = others + [dump_delivery(d) for d in receipts]
+        save(row, "completed", "deliveries")
+
+    publisher.publish(
+        event,
+        receipts_of(row, publisher),
+        done=[key.removeprefix(prefix) for key in row.completed if key.startswith(prefix)],
+        previous=previous_deliveries(row, publisher),
+        on_step=record,
+    )
+
+
+def describe_failure(row, publisher, error):
+    """`error`, prefixed with the publisher and the step that didn't finish."""
+    pending = (s.name for s in publisher.steps if step_key(publisher, s.name) not in row.completed)
+    return f"{step_key(publisher, next(pending, '?'))}: {error}"
 
 
 def process(row, publishers):
-    """Run one claimed event through the publishers and record the outcome."""
+    """Run one claimed event through the publishers and record the outcome.
+    Publishers are independent: one failing doesn't stop or undo the others."""
     event = row.to_event()
-    earlier = earlier_deliveries(row)
-    own = [load_delivery(d) for d in row.deliveries]
+    failures = []
     for publisher in publishers:
-        if publisher.name in row.completed:
-            continue
         try:
-            delivered = publisher.publish(event, earlier + own)
+            run_publisher(row, publisher, event)
+        except LeaseLost:
+            raise
         except Exception as e:
             if not isinstance(e, PublishError):  # a bug, not an outage
                 logger.exception("Publisher %s crashed on event %s", publisher.name, row.id)
-            fail_attempt(row, publishers, event, own, f"{publisher.name}: {e}")
-            return
-        own += delivered
-        row.completed.append(publisher.name)
-        row.deliveries = [dump_delivery(d) for d in own]
-        save(row, "completed", "deliveries")
+            failures.append((publisher, describe_failure(row, publisher, e)))
+    if failures:
+        fail_attempt(row, event, failures)
+        return
 
     row.status = Status.PROCESSED
     row.finished_at = db_now()
@@ -176,43 +213,50 @@ def process(row, publishers):
     logger.info("Processed event %s (%s %s)", row.id, row.operation, row.wigos_identifier)
 
 
-def fail_attempt(row, publishers, event, own, error):
+def fail_attempt(row, event, failures):
     row.attempts += 1
-    row.last_error = error
+    row.last_error = "\n".join(error for _, error in failures)
     if row.attempts >= MAX_ATTEMPTS:
-        give_up(row, publishers, event, own)
+        give_up(row, event, [publisher for publisher, _ in failures])
         return
     row.status = Status.PENDING
     row.next_attempt_at = db_now() + retry_delay(row.attempts)
-    logger.warning("Event %s failed (attempt %d), retrying at %s: %s", row.id, row.attempts, row.next_attempt_at, error)
+    logger.warning(
+        "Event %s failed (attempt %d), retrying at %s: %s", row.id, row.attempts, row.next_attempt_at, row.last_error
+    )
     save(row, "status", "attempts", "last_error", "next_attempt_at")
 
 
-def give_up(row, publishers, event, own):
+def give_up(row, event, publishers):
+    """Mark the event failed and undo the publishers that failed; the others
+    delivered their part, which stays."""
     row.status = Status.FAILED
     row.finished_at = db_now()
     row.next_attempt_at = None
     logger.error("Event %s failed after %d attempts, undoing: %s", row.id, row.attempts, row.last_error)
-    undo(row, publishers, event, own)
-    save(row, "status", "attempts", "last_error", "next_attempt_at", "finished_at", "completed", "deliveries")
+    for publisher in publishers:
+        undo(row, publisher, event)
+    save(
+        row,
+        "status", "attempts", "last_error", "next_attempt_at", "finished_at",
+        "completed", "deliveries", "needs_cleanup",
+    )
 
 
-def undo(row, publishers, event, own):
-    """Undo the completed publishers, newest first. One that undid cleanly
-    leaves `completed` together with its receipts; one that couldn't stays,
-    so the row shows what may still be stored."""
-    for publisher in reversed(publishers):
-        if publisher.name not in row.completed:
-            continue
-        try:
-            publisher.undo(event, own)
-        except Exception as e:
-            logger.exception("Could not undo %s for event %s", publisher.name, row.id)
-            row.last_error += f"\nundo {publisher.name}: {e}"
-            continue
-        row.completed.remove(publisher.name)
-        own = [d for d in own if d.publisher != publisher.name]
-    row.deliveries = [dump_delivery(d) for d in own]
+def undo(row, publisher, event):
+    """Undo a publisher's completed steps. If that works its steps leave
+    `completed` together with their receipts. If not they stay, so the row
+    shows what may still be stored, and it needs cleaning up."""
+    try:
+        publisher.undo(event, receipts_of(row, publisher))
+    except Exception as e:
+        logger.exception("Could not undo %s for event %s", publisher.name, row.id)
+        row.last_error += f"\nundo {publisher.name}: {e}"
+        row.needs_cleanup = True
+        return
+    prefix = step_key(publisher, "")
+    row.completed = [key for key in row.completed if not key.startswith(prefix)]
+    row.deliveries = [d for d in row.deliveries if d["publisher"] != publisher.name]
 
 
 def process_next(publishers):

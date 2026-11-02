@@ -110,47 +110,54 @@ WNM_CENTRE_ID = os.environ.get("WNM_CENTRE_ID", "io-wis2dev-test-wigosnode")
 WNM_STORAGE_URL = os.environ.get("WNM_STORAGE_URL", "https://wigosnode.test.wis2dev.io/webstorage")
 WNM_STORAGE_SECURE = os.environ.get("WNM_STORAGE_SECURE", "false").lower() == "true"
 
-# Publishers the outbox worker runs, in this order, for every station change.
+# Publishers the outbox worker runs for every station change. Each is one process
+# from start to end, and they don't depend on each other.
 # Classes are dotted paths into any installed package (publishing.registry).
 PUBLISHERS = [
     {
-        "NAME": "wis2-storage",
-        "GENERATOR": {
-            "CLASS": "publishing.generators.wmdr2.RecordFileGenerator",
-            "OPTIONS": {"centre_id": WNM_CENTRE_ID},
-        },
-        "TRANSPORT": {
-            "CLASS": "publishing.transports.s3.S3Transport",
-            "OPTIONS": {
-                "endpoint": os.environ.get("WNM_STORAGE_ENDPOINT", "minio:9000"),
-                "bucket": os.environ.get("WNM_STORAGE_BUCKET", "webstorage"),
-                # defaults: the minio service's root user in docker-compose.yml
-                "access_key": os.environ.get("WNM_STORAGE_ACCESS_KEY", "minioadmin"),
-                "secret_key": os.environ.get("WNM_STORAGE_SECRET_KEY", "minioadmin"),
-                "secure": WNM_STORAGE_SECURE,
-                "public_url": WNM_STORAGE_URL,
-                "internal_url": os.environ.get("WNM_STORAGE_INTERNAL_URL") or None,
-                # development: create the bucket with anonymous read if missing
-                "create_bucket": os.environ.get("WNM_STORAGE_CREATE_BUCKET", str(DEBUG)).lower() == "true",
+        # WIS2, from start to end: store the record file, then announce it
+        "NAME": "wis2",
+        "STEPS": [
+            {
+                "NAME": "storage",
+                "GENERATOR": {
+                    "CLASS": "publishing.generators.wmdr2.RecordFileGenerator",
+                    "OPTIONS": {"centre_id": WNM_CENTRE_ID},
+                },
+                "TRANSPORT": {
+                    "CLASS": "publishing.transports.s3.S3Transport",
+                    "OPTIONS": {
+                        "endpoint": os.environ.get("WNM_STORAGE_ENDPOINT", "minio:9000"),
+                        "bucket": os.environ.get("WNM_STORAGE_BUCKET", "webstorage"),
+                        # defaults: the minio service's root user in docker-compose.yml
+                        "access_key": os.environ.get("WNM_STORAGE_ACCESS_KEY", "minioadmin"),
+                        "secret_key": os.environ.get("WNM_STORAGE_SECRET_KEY", "minioadmin"),
+                        "secure": WNM_STORAGE_SECURE,
+                        "public_url": WNM_STORAGE_URL,
+                        "internal_url": os.environ.get("WNM_STORAGE_INTERNAL_URL") or None,
+                        # development: create the bucket with anonymous read if missing
+                        "create_bucket": os.environ.get("WNM_STORAGE_CREATE_BUCKET", str(DEBUG)).lower() == "true",
+                    },
+                },
             },
-        },
-    },
-    {
-        "NAME": "wis2-wnm",
-        "GENERATOR": {
-            "CLASS": "publishing.generators.wnm.WNMGenerator",
-            "OPTIONS": {"centre_id": WNM_CENTRE_ID},
-        },
-        "TRANSPORT": {
-            "CLASS": "publishing.transports.mqtt.MQTTTransport",
-            "OPTIONS": {
-                # default: the mosquitto service in docker-compose.yml
-                "url": os.environ.get("WIS2_BROKER_URL", "mqtt://wis2:wis2@mosquitto:1883"),
-                # Placeholder: the WMDR2 topic is not decided yet
-                "topic": os.environ.get("WIS2_TOPIC", f"origin/a/wis2/{WNM_CENTRE_ID}/TBD-wmdr2"),
+            {
+                "NAME": "wnm",
+                "GENERATOR": {
+                    "CLASS": "publishing.generators.wnm.WNMGenerator",
+                    "OPTIONS": {"centre_id": WNM_CENTRE_ID},
+                },
+                "TRANSPORT": {
+                    "CLASS": "publishing.transports.mqtt.MQTTTransport",
+                    "OPTIONS": {
+                        # default: the mosquitto service in docker-compose.yml
+                        "url": os.environ.get("WIS2_BROKER_URL", "mqtt://wis2:wis2@mosquitto:1883"),
+                        # Placeholder: the WMDR2 topic is not decided yet
+                        "topic": os.environ.get("WIS2_TOPIC", f"origin/a/wis2/{WNM_CENTRE_ID}/TBD-wmdr2"),
+                    },
+                },
+                "ENABLED": os.environ.get("WIS2_PUBLISH_WNM", "true") == "true",
             },
-        },
-        "ENABLED": os.environ.get("WIS2_PUBLISH_WNM", "true") == "true",
+        ],
     },
 ]
 # Threads of the outbox worker (run_publishers); events of the same station
