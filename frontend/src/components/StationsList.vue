@@ -1,6 +1,7 @@
 <script setup>
-import { computed, ref } from "vue";
-import { listMyStations } from "../api";
+import { computed, onUnmounted, ref } from "vue";
+import { listLatestPublications, listMyStations } from "../api";
+import PublicationStatusChip from "./PublicationStatusChip.vue";
 import StationsMap from "./StationsMap.vue";
 import SelectionBar from "./SelectionBar.vue";
 
@@ -12,6 +13,7 @@ const emit = defineEmits(["new", "edit", "batch"]);
 const HEADERS = [
   { title: "WIGOS identifier", key: "wsi" },
   { title: "Name", key: "name" },
+  { title: "Publishing", key: "publishing", sortable: false },
   { title: "", key: "actions", sortable: false, align: "end" },
 ];
 
@@ -26,6 +28,32 @@ listMyStations()
   .catch((err) => {
     loadState.value = { status: "error", error: err.message };
   });
+
+// Each station's latest publishing status, refreshed while one is on its way.
+// A station without one has no chip: no changes yet, or not one the user may see.
+const REFRESH_MS = 5000;
+const latest = ref({});
+let timer = null;
+let left = false;
+
+async function loadLatest() {
+  try {
+    const data = await listLatestPublications();
+    if (left) return;
+    latest.value = data;
+  } catch {
+    return; // the list works without the chips
+  }
+  if (Object.values(latest.value).some(({ status }) => status === "pending" || status === "processing")) {
+    timer = setTimeout(loadLatest, REFRESH_MS);
+  }
+}
+loadLatest();
+
+onUnmounted(() => {
+  left = true;
+  clearTimeout(timer);
+});
 
 const editableIds = computed(() => stations.value.filter((station) => station.can_edit).map((station) => station.station_id));
 // Only stations still listed and editable count as selected.
@@ -79,6 +107,9 @@ const rowProps = ({ item }) => ({ class: selectedIds.value.includes(item.station
             :title="item.can_edit ? undefined : `You don't have permission to edit this station`"
             @update:model-value="toggleSelect(internalItem)"
           />
+        </template>
+        <template #[`item.publishing`]="{ item }">
+          <PublicationStatusChip v-if="latest[item.station_id]" :status="latest[item.station_id].status" />
         </template>
         <template #[`item.actions`]="{ item }">
           <v-btn variant="tonal" color="secondary" size="small" @click="emit('edit', item.station_id)">Edit</v-btn>

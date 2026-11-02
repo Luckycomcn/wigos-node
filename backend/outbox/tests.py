@@ -11,7 +11,7 @@ from unittest import mock
 
 from django.core.management import call_command
 from django.db import transaction
-from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings
+from django.test import Client, SimpleTestCase, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APITestCase
@@ -1260,6 +1260,76 @@ class PublicationsApiTestCase(APITestCase):
         self.assertEqual(self.client.get(reverse("publication-retry", args=[row.pk])).status_code, 405)
 
 
+class PublicationsAttentionAndLatestTestCase(PublicationsApiTestCase):
+    """What the sidebar's counter and the stations' chips read."""
+
+    def attention(self, user=None):
+        self.client.force_authenticate(user or self.member)
+        body = self.client.get(reverse("publications"), {"attention": 1, "limit": 1}).json()
+        return body["count"]
+
+    def latest(self, user=None):
+        self.client.force_authenticate(user or self.member)
+        response = self.client.get(reverse("publications-latest"))
+        self.assertEqual(response.status_code, 200, response.content)
+        return response.json()
+
+    def failed(self, keys, **fields):
+        return make_row(issuers=["756"], status=PublicationEvent.Status.FAILED, ordering_keys=keys, **fields)
+
+    def test_a_failure_counts_until_a_later_change_replaces_it(self):
+        self.failed(["station:1"])
+        self.assertEqual(self.attention(), 1)
+        make_row(issuers=["756"], ordering_keys=["station:1"], status=PublicationEvent.Status.PROCESSED)
+        self.assertEqual(self.attention(), 0)
+
+    def test_a_retry_takes_it_off_the_count(self):
+        row = self.failed(["station:1"])
+        self.assertEqual(self.retry(row).status_code, 200)
+        self.assertEqual(self.attention(), 0)
+
+    def test_a_failure_needing_cleanup_counts_even_after_a_later_change(self):
+        self.failed(["station:1"], needs_cleanup=True)
+        make_row(issuers=["756"], ordering_keys=["station:1"])
+        self.assertEqual(self.attention(), 1)
+
+    def test_only_failures_count(self):
+        for status in ("pending", "processing", "processed", "published"):
+            make_row(issuers=["756"], ordering_keys=[f"station:{status}"], status=status)
+        self.assertEqual(self.attention(), 0)
+
+    def test_the_count_only_covers_the_users_groups(self):
+        self.failed(["station:1"])
+        make_row(issuers=["76"], status=PublicationEvent.Status.FAILED, ordering_keys=["station:2"])
+        self.assertEqual(self.attention(), 1)
+        self.assertEqual(self.attention(self.other), 1)
+        self.assertEqual(self.attention(self.outsider), 0)
+        self.assertEqual(self.attention(self.admin), 2)
+
+    def test_latest_gives_each_stations_newest_event(self):
+        make_row(issuers=["756"], station_id=1, status=PublicationEvent.Status.FAILED)
+        newest = make_row(issuers=["756"], station_id=1, status=PublicationEvent.Status.PROCESSED)
+        other = make_row(issuers=["756"], station_id=2, status=PublicationEvent.Status.FAILED)
+
+        latest = self.latest()
+
+        self.assertEqual(set(latest), {"1", "2"})
+        self.assertEqual((latest["1"]["id"], latest["1"]["status"]), (newest.pk, "processed"))
+        self.assertEqual((latest["2"]["id"], latest["2"]["status"]), (other.pk, "failed"))
+
+    def test_latest_only_covers_the_users_groups(self):
+        make_row(issuers=["756"], station_id=1)
+        make_row(issuers=["76"], station_id=2)
+        self.assertEqual(set(self.latest()), {"1"})
+        self.assertEqual(set(self.latest(self.other)), {"2"})
+        self.assertEqual(self.latest(self.outsider), {})
+        self.assertEqual(set(self.latest(self.admin)), {"1", "2"})
+
+    def test_latest_needs_a_login(self):
+        self.client.force_authenticate(None)
+        self.assertIn(self.client.get(reverse("publications-latest")).status_code, (401, 403))
+
+
 class PublicationsVisibilityUseCaseTestCase(APITestCase):
     """The whole flow: real stations saved through the API, nothing set by hand,
     then what each kind of user sees."""
@@ -1365,3 +1435,30 @@ class PublicationsVisibilityUseCaseTestCase(APITestCase):
         self.create(self.author, record("0-756-0-uc8"))
         self.colleague.groups.clear()
         self.assertEqual(self.seen(self.colleague), [])
+
+    def test_a_real_login_session_works_the_way_the_frontend_uses_it(self):
+        self.create(self.author, record("0-756-0-uc9"))
+        event = PublicationEvent.objects.get()
+        PublicationEvent.objects.filter(pk=event.pk).update(status=PublicationEvent.Status.FAILED)
+        retry = reverse("publication-retry", args=[event.pk])
+        browser = Client(enforce_csrf_checks=True)
+
+        self.assertEqual(browser.get(reverse("publications")).status_code, 403)  # not logged in yet
+
+        browser.get(reverse("auth-csrf"))
+        login = browser.post(
+            reverse("auth-login"), {"username": "uc_colleague", "password": "pw"}, content_type="application/json"
+        )
+        self.assertEqual(login.status_code, 200, login.content)
+        browser.get(reverse("auth-csrf"))  # login rotates the token
+
+        [listed] = browser.get(reverse("publications")).json()["results"]
+        self.assertEqual((listed["id"], listed["can_retry"]), (event.pk, True))
+
+        self.assertEqual(browser.post(retry).status_code, 403)  # no CSRF token
+        event.refresh_from_db()
+        self.assertEqual(event.status, PublicationEvent.Status.FAILED)
+
+        answer = browser.post(retry, HTTP_X_CSRFTOKEN=browser.cookies["csrftoken"].value)
+        self.assertEqual(answer.status_code, 200, answer.content)
+        self.assertEqual(answer.json()["status"], "pending")

@@ -1,4 +1,4 @@
-from django.db.models import Exists, OuterRef
+from django.db.models import Exists, OuterRef, Q
 from rest_framework.pagination import LimitOffsetPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -56,6 +56,12 @@ class PublicationListView(APIView):
 
     def get(self, request):
         events = visible_events(request.user)
+        if "attention" in request.query_params:
+            # failures someone can still act on: an event a later change replaced
+            # stays failed in the log, but no longer counts
+            events = events.filter(
+                Q(status=PublicationEvent.Status.FAILED) & (Q(has_later_event=False) | Q(needs_cleanup=True))
+            )
         for field in ("status", "source", "operation"):
             if field in request.query_params:
                 events = events.filter(**{field: request.query_params[field]})
@@ -72,6 +78,20 @@ class PublicationListView(APIView):
         paginator = EventPagination()
         page = paginator.paginate_queryset(events, request, view=self)
         return paginator.get_paginated_response([event_data(event) for event in page])
+
+
+class PublicationLatestView(APIView):
+    """{station_id: its latest event the user can see}, for the list of stations.
+    Here and not in the stations' own endpoint, so `api` doesn't need the outbox."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        latest = visible_events(request.user).order_by("station_id", "-id").distinct("station_id")
+        return Response({
+            event.station_id: {"id": event.id, "status": event.status, "finished_at": event.finished_at}
+            for event in latest
+        })
 
 
 class PublicationRetryView(APIView):
