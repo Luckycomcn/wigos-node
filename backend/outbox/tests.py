@@ -1097,3 +1097,271 @@ class ReadBackReceiptsTestCase(TestCase):
         self.assertEqual(row.status, PublicationEvent.Status.FAILED)
         self.assertIn("without a body", row.last_error)
         self.assertEqual(mirrored.sent, [])
+
+
+class PublicationsApiTestCase(APITestCase):
+    def setUp(self):
+        PublicationEvent.objects.all().delete()
+        self.member = self.user("api_member", 756)
+        self.other = self.user("api_other", 76)
+        self.outsider = self.user("api_outsider")
+        self.admin = WIGOSNodeUser.objects.create_superuser(username="api_admin", email="api_admin@example.com", password="pw")
+
+    def user(self, name, *issuers):
+        user = WIGOSNodeUser.objects.create_user(username=name, email=f"{name}@example.com", password="pw")
+        for issuer in issuers:
+            user.groups.add(WIGOSNodeGroup.objects.get(issuer_identifier=issuer).group)
+        return user
+
+    def listed(self, user=None, **params):
+        self.client.force_authenticate(user or self.member)
+        response = self.client.get(reverse("publications"), params)
+        self.assertEqual(response.status_code, 200, response.content)
+        return response.json()["results"]
+
+    def ids(self, user=None, **params):
+        return [event["id"] for event in self.listed(user, **params)]
+
+    def retry(self, event, user=None):
+        self.client.force_authenticate(user or self.member)
+        return self.client.post(reverse("publication-retry", args=[event.pk]))
+
+    def test_login_is_required(self):
+        row = make_row(issuers=["756"], status=PublicationEvent.Status.FAILED)
+        self.client.force_authenticate(None)
+        self.assertIn(self.client.get(reverse("publications")).status_code, (401, 403))
+        self.assertIn(self.client.post(reverse("publication-retry", args=[row.pk])).status_code, (401, 403))
+
+    def test_a_member_sees_the_events_of_their_issuers_newest_first(self):
+        swiss = make_row(issuers=["756"], ordering_keys=["station:1"])
+        moved = make_row(issuers=["756", "76"], ordering_keys=["station:2"])
+        deleted = make_row(operation=Operation.DELETE, issuers=["756"], ordering_keys=["station:3"])
+        brazilian = make_row(issuers=["76"], ordering_keys=["station:4"])
+
+        self.assertEqual(self.ids(), [deleted.pk, moved.pk, swiss.pk])
+        self.assertEqual(self.ids(self.other), [brazilian.pk, moved.pk])
+
+    def test_a_user_without_issuer_groups_sees_nothing(self):
+        make_row(issuers=["756"])
+        self.assertEqual(self.ids(self.outsider), [])
+
+    def test_superusers_see_the_full_log(self):
+        make_row(issuers=["756"])
+        make_row(issuers=["76"])
+        make_row(issuers=[])
+        self.assertEqual(len(self.ids(self.admin)), 3)
+
+    def test_filters(self):
+        failed = make_row(issuers=["756"], status=PublicationEvent.Status.FAILED, station_id=1, source="api", changed_by=self.member)
+        processed = make_row(issuers=["756"], status=PublicationEvent.Status.PROCESSED, station_id=2, source="admin")
+        self.assertEqual(self.ids(status="failed"), [failed.pk])
+        self.assertEqual(self.ids(station_id=2), [processed.pk])
+        self.assertEqual(self.ids(source="admin"), [processed.pk])
+        self.assertEqual(self.ids(changed_by="me"), [failed.pk])
+        self.assertEqual(self.ids(operation="delete"), [])
+
+    def test_bad_filters_are_refused(self):
+        self.client.force_authenticate(self.member)
+        self.assertEqual(self.client.get(reverse("publications"), {"station_id": "x"}).status_code, 400)
+        self.assertEqual(self.client.get(reverse("publications"), {"changed_by": "someone"}).status_code, 400)
+
+    def test_filters_never_widen_what_a_user_sees(self):
+        make_row(issuers=["76"], station_id=9)
+        self.assertEqual(self.ids(station_id=9), [])
+
+    def test_is_paginated(self):
+        for _ in range(3):
+            make_row(issuers=["756"])
+        self.client.force_authenticate(self.member)
+        body = self.client.get(reverse("publications"), {"limit": 2}).json()
+        self.assertEqual((body["count"], len(body["results"])), (3, 2))
+        self.assertIsNotNone(body["next"])
+
+    def test_an_event_says_who_and_what_without_internals(self):
+        make_row(
+            issuers=["756"], source="api", changed_by=self.member, status=PublicationEvent.Status.FAILED,
+            last_error="wis2:wnm: broker down",
+            deliveries=[
+                {"publisher": "wis2", "step": "storage", "name": "f", "media_type": "t", "topic": None,
+                 "url": "https://public/f", "internal_url": "http://minio:9000/secret/f"},
+                {"publisher": "wis2", "step": "wnm", "name": None, "media_type": "t", "topic": None,
+                 "url": None, "internal_url": None},
+            ],
+        )
+        [event] = self.listed()
+        self.assertEqual(event["changed_by"], "api_member")
+        self.assertEqual((event["source"], event["source_label"]), ("api", "API"))
+        self.assertEqual(event["last_error"], "wis2:wnm: broker down")
+        self.assertEqual(event["files"], ["https://public/f"])
+        self.assertNotIn("minio", json.dumps(event))
+        self.assertNotIn("wmdrv2", event)
+        self.assertNotIn("deliveries", event)
+
+    def test_an_administrators_change_shows_no_user_name(self):
+        make_row(issuers=["756"], source="admin")
+        [event] = self.listed()
+        self.assertEqual((event["changed_by"], event["source_label"]), (None, "Administrator"))
+
+    def test_can_retry_follows_the_retry_rules(self):
+        retryable = make_row(issuers=["756"], status=PublicationEvent.Status.FAILED, ordering_keys=["station:1"])
+        make_row(issuers=["756"], status=PublicationEvent.Status.PROCESSED, ordering_keys=["station:2"])
+        outdated = make_row(issuers=["756"], status=PublicationEvent.Status.FAILED, ordering_keys=["station:3"])
+        make_row(issuers=["756"], ordering_keys=["station:3"])
+
+        flags = {e["id"]: e["can_retry"] for e in self.listed()}
+
+        self.assertTrue(flags.pop(retryable.pk))
+        self.assertFalse(flags.pop(outdated.pk))
+        self.assertFalse(any(flags.values()))
+
+    def test_a_member_can_retry_their_failed_event(self):
+        row = make_row(issuers=["756"], status=PublicationEvent.Status.FAILED, ordering_keys=KEYS, attempts=1)
+
+        with self.captureOnCommitCallbacks() as callbacks:
+            response = self.retry(row)
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["status"], "pending")
+        self.assertFalse(response.json()["can_retry"])
+        self.assertEqual(len(callbacks), 1)
+        row.refresh_from_db()
+        self.assertEqual((row.status, row.attempts), (PublicationEvent.Status.PENDING, 0))
+
+    def test_an_event_outside_the_users_groups_looks_like_it_doesnt_exist(self):
+        row = make_row(issuers=["76"], status=PublicationEvent.Status.FAILED)
+        for user in (self.member, self.outsider):
+            self.assertEqual(self.retry(row, user).status_code, 404)
+        row.refresh_from_db()
+        self.assertEqual(row.status, PublicationEvent.Status.FAILED)
+        self.client.force_authenticate(self.member)
+        self.assertEqual(self.client.post(reverse("publication-retry", args=[row.pk + 1000])).status_code, 404)
+
+    def test_either_issuer_of_a_moved_wsi_can_retry(self):
+        row = make_row(issuers=["756", "76"], status=PublicationEvent.Status.FAILED)
+        self.assertEqual(self.retry(row, self.other).status_code, 200)
+
+    def test_superusers_can_retry_anything(self):
+        row = make_row(issuers=["76"], status=PublicationEvent.Status.FAILED)
+        self.assertEqual(self.retry(row, self.admin).status_code, 200)
+
+    def test_a_refused_retry_says_why(self):
+        outdated = make_row(issuers=["756"], status=PublicationEvent.Status.FAILED, ordering_keys=KEYS)
+        make_row(issuers=["756"], ordering_keys=KEYS)
+        response = self.retry(outdated)
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("save the station again", response.json()["detail"])
+
+        processed = make_row(issuers=["756"], status=PublicationEvent.Status.PROCESSED, ordering_keys=["station:7"])
+        self.assertEqual(self.retry(processed).status_code, 409)
+
+    def test_only_post_retries(self):
+        row = make_row(issuers=["756"], status=PublicationEvent.Status.FAILED)
+        self.client.force_authenticate(self.member)
+        self.assertEqual(self.client.get(reverse("publication-retry", args=[row.pk])).status_code, 405)
+
+
+class PublicationsVisibilityUseCaseTestCase(APITestCase):
+    """The whole flow: real stations saved through the API, nothing set by hand,
+    then what each kind of user sees."""
+
+    def setUp(self):
+        PublicationEvent.objects.all().delete()
+        self.author = self.user("uc_author", 756)
+        self.colleague = self.user("uc_colleague", 756)  # same group, didn't make the change
+        self.foreigner = self.user("uc_foreigner", 76)
+        self.outsider = self.user("uc_outsider")
+        self.admin = WIGOSNodeUser.objects.create_superuser(username="uc_admin", email="uc_admin@example.com", password="pw")
+
+    def user(self, name, *issuers):
+        user = WIGOSNodeUser.objects.create_user(username=name, email=f"{name}@example.com", password="pw")
+        for issuer in issuers:
+            user.groups.add(WIGOSNodeGroup.objects.get(issuer_identifier=issuer).group)
+        return user
+
+    def create(self, user, data):
+        self.client.force_authenticate(user)
+        response = self.client.post(reverse("wmdrv2"), data, format="json")
+        self.assertEqual(response.status_code, 201, response.content)
+        return Station.objects.get(pk=response.json()["station_id"])
+
+    def update(self, user, station, data):
+        self.client.force_authenticate(user)
+        response = self.client.put(reverse("wmdrv2", args=[station.pk]), data, format="json")
+        self.assertEqual(response.status_code, 200, response.content)
+
+    def seen(self, user):
+        self.client.force_authenticate(user)
+        return [(e["operation"], e["wigos_identifier"]) for e in self.client.get(reverse("publications")).json()["results"]]
+
+    def can_edit(self, user, station):
+        self.client.force_authenticate(user)
+        return {s["station_id"]: s["can_edit"] for s in self.client.get(reverse("my_stations")).json()}[station.pk]
+
+    def test_a_change_is_seen_by_the_issuer_group_and_nobody_else(self):
+        self.create(self.author, record("0-756-0-uc1"))
+        expected = [("create", "0-756-0-uc1")]
+
+        self.assertEqual(self.seen(self.author), expected)
+        self.assertEqual(self.seen(self.colleague), expected)  # by group, not by author
+        self.assertEqual(self.seen(self.admin), expected)
+        self.assertEqual(self.seen(self.foreigner), [])
+        self.assertEqual(self.seen(self.outsider), [])
+
+    def test_those_who_can_edit_the_station_see_its_events_and_the_rest_dont(self):
+        station = self.create(self.author, record("0-756-0-uc2"))
+        for user in (self.author, self.colleague, self.admin):
+            self.assertTrue(self.can_edit(user, station), user.username)
+            self.assertEqual(len(self.seen(user)), 1, user.username)
+        for user in (self.foreigner, self.outsider):
+            self.assertFalse(self.can_edit(user, station), user.username)
+            self.assertEqual(self.seen(user), [], user.username)
+
+    def test_a_colleague_sees_later_updates_too(self):
+        station = self.create(self.author, record("0-756-0-uc3"))
+        self.update(self.colleague, station, record("0-756-0-uc3", "New title"))
+        expected = [("update", "0-756-0-uc3"), ("create", "0-756-0-uc3")]
+        self.assertEqual(self.seen(self.author), expected)
+        self.assertEqual(self.seen(self.foreigner), [])
+
+    def test_a_deleted_stations_events_stay_visible_to_its_group(self):
+        station = self.create(self.author, record("0-756-0-uc4"))
+        station.delete()
+        self.assertEqual(self.seen(self.colleague), [("delete", "0-756-0-uc4"), ("create", "0-756-0-uc4")])
+        self.assertEqual(self.seen(self.foreigner), [])
+
+    def test_a_wsi_moved_to_another_issuer_shows_the_move_to_both_groups(self):
+        station = self.create(self.admin, record("0-756-0-uc5"))
+        self.update(self.admin, station, record("0-76-0-uc5"))
+
+        move = ("update", "0-76-0-uc5")
+        self.assertEqual(self.seen(self.author), [move, ("create", "0-756-0-uc5")])
+        self.assertEqual(self.seen(self.foreigner), [move])  # not the time before it arrived
+        self.assertEqual(self.seen(self.outsider), [])
+
+    def test_an_additional_wsi_of_another_issuer_shows_to_both_groups(self):
+        both = self.user("uc_both", 756, 76)
+        data = record("0-756-0-uc6")
+        data["properties"]["additionalIds"] = ["0-76-0-uc6"]
+        self.create(both, data)
+
+        self.assertEqual(len(self.seen(self.colleague)), 1)
+        self.assertEqual(len(self.seen(self.foreigner)), 1)
+        self.assertEqual(self.seen(self.outsider), [])
+
+    def test_a_member_can_retry_a_colleagues_failed_change_but_a_foreigner_cant(self):
+        self.create(self.author, record("0-756-0-uc7"))
+        event = PublicationEvent.objects.get()
+        PublicationEvent.objects.filter(pk=event.pk).update(status=PublicationEvent.Status.FAILED)
+        retry = reverse("publication-retry", args=[event.pk])
+
+        self.client.force_authenticate(self.foreigner)
+        self.assertEqual(self.client.post(retry).status_code, 404)
+        self.client.force_authenticate(self.outsider)
+        self.assertEqual(self.client.post(retry).status_code, 404)
+        self.client.force_authenticate(self.colleague)
+        self.assertEqual(self.client.post(retry).status_code, 200)
+
+    def test_leaving_the_group_takes_the_events_away(self):
+        self.create(self.author, record("0-756-0-uc8"))
+        self.colleague.groups.clear()
+        self.assertEqual(self.seen(self.colleague), [])
