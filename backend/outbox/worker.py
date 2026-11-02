@@ -12,13 +12,12 @@ A failed event stays in the log but releases its keys once it is cleaned up
 
 Publishers run in order for each event, and each one gets the receipts of
 the ones before it. After every publisher the row records it in `completed`
-with its receipts, so a retry skips it and reuses what it stored. When an
-event runs out of attempts it becomes `failed` and its completed publishers
-are undone, newest first.
+with its receipts. When an event runs out of attempts (see MAX_ATTEMPTS) it
+becomes `failed` and its completed publishers are undone, newest first.
 
 A claimed event is `processing` with a lease (`locked_until`), renewed after
 every publisher. A worker that dies leaves the lease to expire; the event
-is then claimed again and the crash counts as a failed attempt. A single
+is then claimed again and resumes after its completed publishers. A single
 publisher must therefore finish within LEASE. Every time the worker sets or
 compares comes from the database clock, so workers on hosts whose clocks
 differ still agree on when a lease expires."""
@@ -40,7 +39,9 @@ from .models import PublicationEvent
 
 logger = logging.getLogger("outbox")
 
-MAX_ATTEMPTS = 5
+# Retries are manual: the first failure makes the event failed, and a user
+# retries it. Raising this turns on automatic retries with backoff.
+MAX_ATTEMPTS = 1
 RETRY_DELAY = timedelta(seconds=30)  # doubled after every failed attempt
 MAX_RETRY_DELAY = timedelta(hours=1)
 LEASE = timedelta(minutes=5)
@@ -94,8 +95,7 @@ def retry_delay(attempts):
 
 def claim():
     """Take the oldest claimable event: pending and due, or processing with
-    an expired lease (its worker crashed, which counts as a failed attempt).
-    Events behind an older unreleased event sharing an ordering key are
+    an expired lease (its worker crashed, so it resumes). Events behind an older unreleased event sharing an ordering key are
     skipped. Returns the event, now processing under a new lease, or None."""
     now = db_now()
     blocking = PublicationEvent.objects.filter(
@@ -115,12 +115,11 @@ def claim():
         if row is None:
             return None
         if row.status == Status.PROCESSING:
-            row.attempts += 1
             row.last_error = f"worker stopped while processing (lease expired at {row.locked_until})"
             logger.warning("Event %s: %s", row.id, row.last_error)
         row.status = Status.PROCESSING
         row.locked_until = now + LEASE
-        row.save(update_fields=["status", "locked_until", "attempts", "last_error"])
+        row.save(update_fields=["status", "locked_until", "last_error"])
     return row
 
 
@@ -155,9 +154,6 @@ def process(row, publishers):
     event = row.to_event()
     earlier = earlier_deliveries(row)
     own = [load_delivery(d) for d in row.deliveries]
-    if row.attempts >= MAX_ATTEMPTS:  # the last attempt crashed
-        give_up(row, publishers, event, own)
-        return
     for publisher in publishers:
         if publisher.name in row.completed:
             continue

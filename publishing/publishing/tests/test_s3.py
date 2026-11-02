@@ -2,6 +2,7 @@ import json
 import unittest
 from unittest import mock
 
+import urllib3
 from minio.error import S3Error
 
 from publishing.base import Location, Message, PublishError
@@ -86,12 +87,14 @@ class S3TransportTestCase(unittest.TestCase):
 
     def test_storage_errors_become_publish_errors(self):
         t = transport()
-        t.client.fail = S3Error("AccessDenied", "denied", "", "", "", None)
-        with self.assertRaises(PublishError):
-            t.send(MESSAGE)
-        t.client.fail = ConnectionRefusedError("minio is down")
-        with self.assertRaises(PublishError):
-            t.send(MESSAGE)
+        for error in (
+            S3Error("AccessDenied", "denied", "", "", "", None),
+            ConnectionRefusedError("minio is down"),
+            urllib3.exceptions.MaxRetryError(None, "/", "gave up"),
+        ):
+            t.client.fail = error
+            with self.assertRaises(PublishError):
+                t.send(MESSAGE)
 
     def test_unnamed_messages_are_refused(self):
         with self.assertRaises(PublishError):

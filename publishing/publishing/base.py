@@ -75,7 +75,8 @@ class Delivery:
 
 
 class PublishError(Exception):
-    """A message could not be delivered. The worker retries the event later."""
+    """A message could not be delivered. The worker marks the event failed;
+    retrying it is up to a user."""
 
 
 class MessageGenerator(ABC):

@@ -112,8 +112,6 @@ WNM_STORAGE_SECURE = os.environ.get("WNM_STORAGE_SECURE", "false").lower() == "t
 
 # Publishers the outbox worker runs, in this order, for every station change.
 # Classes are dotted paths into any installed package (publishing.registry).
-# The WNMs still go to the log until the MQTT transport exists
-# (docs/publishing-plan.md, commit 13).
 PUBLISHERS = [
     {
         "NAME": "wis2-storage",
@@ -144,9 +142,13 @@ PUBLISHERS = [
             "OPTIONS": {"centre_id": WNM_CENTRE_ID},
         },
         "TRANSPORT": {
-            "CLASS": "publishing.transports.log.LogTransport",
-            # Placeholder: the WMDR2 topic is not decided yet
-            "OPTIONS": {"topic": os.environ.get("WIS2_TOPIC", f"origin/a/wis2/{WNM_CENTRE_ID}/TBD-wmdr2")},
+            "CLASS": "publishing.transports.mqtt.MQTTTransport",
+            "OPTIONS": {
+                # default: the mosquitto service in docker-compose.yml
+                "url": os.environ.get("WIS2_BROKER_URL", "mqtt://wis2:wis2@mosquitto:1883"),
+                # Placeholder: the WMDR2 topic is not decided yet
+                "topic": os.environ.get("WIS2_TOPIC", f"origin/a/wis2/{WNM_CENTRE_ID}/TBD-wmdr2"),
+            },
         },
         "ENABLED": os.environ.get("WIS2_PUBLISH_WNM", "true") == "true",
     },

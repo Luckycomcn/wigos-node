@@ -30,6 +30,7 @@ from publishing.base import (
 from publishing.generators.wmdr2 import RecordFileGenerator
 from publishing.generators.wnm import WNMGenerator
 from publishing.registry import ConfigurationError
+from publishing.transports.mqtt import MQTTTransport
 from publishing.transports.s3 import S3Transport
 
 from . import worker
@@ -240,6 +241,7 @@ class PublishersSettingTestCase(SimpleTestCase):
         self.assertIsInstance(storage.transport, S3Transport)
         self.assertIsInstance(wnm.generator, WNMGenerator)
         self.assertFalse(wnm.generator.skip_missing)
+        self.assertIsInstance(wnm.transport, MQTTTransport)
 
     def test_publishers_are_built_once(self):
         self.assertIs(get_publishers()[0], get_publishers()[0])
@@ -361,6 +363,7 @@ class WorkerTestCase(TestCase):
         self.assertEqual(wnm["properties"]["integrity"]["value"], digest)
         self.assertFalse(worker.process_next(self.publishers))
 
+    @mock.patch.object(worker, "MAX_ATTEMPTS", 5)  # with automatic retries turned on
     def test_retry_skips_completed_publishers_and_reuses_the_stored_file(self):
         row = make_row(ordering_keys=KEYS)
         self.broker.failures = 1
@@ -385,20 +388,20 @@ class WorkerTestCase(TestCase):
         self.assertEqual([worker.retry_delay(n) for n in (1, 2, 3)], [timedelta(seconds=s) for s in (30, 60, 120)])
         self.assertEqual(worker.retry_delay(20), timedelta(hours=1))
 
-    def test_gives_up_after_the_last_attempt_and_removes_the_stored_file(self):
+    def test_a_broker_outage_fails_the_event_at_once_and_removes_the_stored_file(self):
         row = make_row(ordering_keys=KEYS)
-        self.broker.failures = 99
+        self.broker.failures = 1
 
-        with self.assertLogs("outbox", "WARNING"):
-            for _ in range(worker.MAX_ATTEMPTS):
-                self.process_due()
+        with self.assertLogs("outbox", "ERROR"):
+            worker.process_next(self.publishers)
 
         row.refresh_from_db()
-        self.assertEqual((row.status, row.attempts), (PublicationEvent.Status.FAILED, worker.MAX_ATTEMPTS))
+        self.assertEqual((row.status, row.attempts), (PublicationEvent.Status.FAILED, 1))
+        self.assertIn("wnm: broker down", row.last_error)
         self.assertEqual((row.completed, row.deliveries), ([], []))
         self.assertIsNotNone(row.finished_at)
         self.assertEqual(self.storage.files, {})
-        self.assertFalse(self.process_due())  # failed events aren't retried
+        self.assertFalse(self.process_due())  # retrying is up to a user
 
     def test_a_failing_undo_is_recorded_and_the_event_stays_failed(self):
         row = make_row(ordering_keys=KEYS)
@@ -416,7 +419,7 @@ class WorkerTestCase(TestCase):
         self.assertEqual([d["publisher"] for d in row.deliveries], ["files"])
         self.assertEqual(len(self.storage.files), 1)
 
-    def test_a_crashing_plugin_counts_as_a_failed_attempt(self):
+    def test_a_crashing_plugin_fails_the_event(self):
         row = make_row(ordering_keys=KEYS)
         publishers = [DefaultPublisher("broken", BrokenGenerator(), self.broker)]
 
@@ -424,7 +427,7 @@ class WorkerTestCase(TestCase):
             worker.process_next(publishers)
 
         row.refresh_from_db()
-        self.assertEqual((row.status, row.attempts), (PublicationEvent.Status.PENDING, 1))
+        self.assertEqual((row.status, row.attempts), (PublicationEvent.Status.FAILED, 1))
         self.assertIn("broken: boom", row.last_error)
 
     def test_deletion_links_to_the_last_processed_file_and_keeps_it(self):
@@ -533,29 +536,17 @@ class WorkerTestCase(TestCase):
         self.store_record_file(row)
         return row
 
-    def test_a_crashed_event_is_reclaimed_and_resumed(self):
+    def test_a_crashed_event_is_reclaimed_and_resumed_without_failing(self):
         row = self.crashed_row(attempts=0)
 
         with self.assertLogs("outbox", "WARNING"):
             self.assertTrue(worker.process_next(self.publishers))
 
         row.refresh_from_db()
-        self.assertEqual((row.status, row.attempts), (PublicationEvent.Status.PROCESSED, 1))
+        self.assertEqual((row.status, row.attempts), (PublicationEvent.Status.PROCESSED, 0))
         self.assertIn("lease expired", row.last_error)
         self.assertEqual(self.storage.puts, 1)  # not stored again
         self.assertEqual(self.broker.sent[0]["links"][0]["href"], row.deliveries[0]["url"])
-
-    def test_a_crash_on_the_last_attempt_is_undone(self):
-        row = self.crashed_row(attempts=worker.MAX_ATTEMPTS - 1)
-
-        with self.assertLogs("outbox", "WARNING"):
-            worker.process_next(self.publishers)
-
-        row.refresh_from_db()
-        self.assertEqual((row.status, row.attempts), (PublicationEvent.Status.FAILED, worker.MAX_ATTEMPTS))
-        self.assertEqual((row.completed, row.deliveries), ([], []))
-        self.assertEqual(self.storage.files, {})
-        self.assertEqual(self.broker.sent, [])
 
     def test_a_worker_that_lost_its_lease_stops(self):
         row = make_row(ordering_keys=KEYS)

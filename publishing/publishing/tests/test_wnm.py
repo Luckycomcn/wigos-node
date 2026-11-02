@@ -141,6 +141,12 @@ class WNMGeneratorTestCase(unittest.TestCase):
     def test_deletion_of_something_never_announced_sends_nothing(self):
         self.assertEqual(self.generate(Operation.DELETE, []), [])
 
+    def test_a_retry_repeats_the_same_data_id_and_pubtime(self):
+        first, second = self.generate(Operation.UPDATE, [self.stored]) + self.generate(Operation.UPDATE, [self.stored])
+        self.assertEqual(first["properties"]["data_id"], second["properties"]["data_id"])
+        self.assertEqual(first["properties"]["pubtime"], "2026-10-28T00:00:00Z")  # when the change was made
+        self.assertEqual(second["properties"]["pubtime"], first["properties"]["pubtime"])
+
     def test_message_is_a_geojson_wnm(self):
         [message] = self.generator.generate(make_event(wmdrv2=RECORD), [self.stored])
         self.assertEqual(message.media_type, "application/geo+json")
