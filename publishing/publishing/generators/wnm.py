@@ -137,6 +137,9 @@ class WNMGenerator(MessageGenerator):
                         centre_id=self.centre_id,
                         content=delivery.content,
                         media_type=self.media_type,
+                        # the same on every retry, so receivers can drop repeats
+                        # by data_id and pubtime
+                        pubtime=event.occurred_at,
                     )
                 ).encode("utf-8"),
                 media_type=WNM_MEDIA_TYPE,

@@ -18,7 +18,7 @@ import HistoryDialog from "./HistoryDialog.vue";
 // `selected` (a Set of station IDs) is kept by the parent so it survives a
 // trip to the batch wizard and back.
 const selected = defineModel("selected", { type: Set, required: true });
-const emit = defineEmits(["new", "edit", "batch"]);
+const emit = defineEmits(["new", "edit", "batch", "changed"]);
 
 const { t } = useI18n();
 

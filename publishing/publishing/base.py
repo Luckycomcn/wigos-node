@@ -1,9 +1,10 @@
 """Plugin interfaces.
 
-A MessageGenerator turns an Event into Messages, a TransportLayer delivers
-them, and a Publisher pairs one of each. Publishers run in their configured
-order for every event, and each one gets the Deliveries (receipts) of the
-publishers before it.
+A MessageGenerator turns an Event into Messages and a TransportLayer delivers
+them. A Publisher is one publishing process from start to end: an ordered list
+of Steps, each pairing a generator with a transport. Each step gets the
+Deliveries (receipts) of the steps before it in the same publisher. Publishers
+know nothing about each other, and one failing doesn't affect the others.
 
 Byte-level consistency: a storage transport returns the Location of what it
 stored. Before a generator that needs_content() runs, its Publisher
@@ -45,7 +46,7 @@ class Event:
 
 @dataclass(frozen=True)
 class Message:
-    body: bytes
+    body: bytes | None  # None in a receipt read back from the outbox: it isn't kept
     media_type: str
     name: str | None = None  # file name for storage transports
     topic: str | None = None  # overrides the transport's default topic
@@ -66,16 +67,20 @@ class Location:
 
 @dataclass(frozen=True)
 class Delivery:
-    """Receipt of one sent message, handed to the publishers that run later."""
+    """Receipt of one sent message, handed to the later steps of its publisher.
+    For the stored file use `content` (see needs_content()), not message.body:
+    a receipt read back from the outbox has no body."""
 
     publisher: str  # name of the publisher that sent it
     message: Message
     location: Location | None = None  # storage transports only
     content: bytes | None = None  # the file retrieved from location, see needs_content()
+    step: str | None = None  # name of the step that sent it
 
 
 class PublishError(Exception):
-    """A message could not be delivered. The worker retries the event later."""
+    """A message could not be delivered. The worker marks the event failed;
+    retrying it is up to a user."""
 
 
 class MessageGenerator(ABC):
@@ -90,7 +95,7 @@ class MessageGenerator(ABC):
     def generate(self, event: Event, deliveries: list[Delivery]) -> list[Message]:
         """Messages for this event; [] if this generator ignores it (e.g. a
         record file generator on DELETE). `deliveries` are the receipts of
-        the publishers that ran before this one."""
+        the steps that ran before this one in the same publisher."""
 
 
 class TransportLayer(ABC):
@@ -122,27 +127,38 @@ class TransportLayer(ABC):
         return [self.send(message) for message in messages]
 
 
+@dataclass(frozen=True)
+class Step:
+    """One stage of a publisher: what to generate, and how to deliver it."""
+
+    name: str  # unique within its publisher
+    generator: MessageGenerator
+    transport: TransportLayer
+
+
 class Publisher(ABC):
-    """The coordinating instance: pairs a generator with a transport and
-    feeds the generator what it needs. Subclasses decide which events they
-    publish, and may override publish() for special flows."""
+    """One publishing process from start to end, and the coordinating instance
+    of its steps: it runs them in order and feeds each generator what it needs.
+    Subclasses decide which events they publish, and may override publish() for
+    special flows."""
 
     retrieve_timeout = 30  # seconds
 
-    def __init__(self, name: str, generator: MessageGenerator, transport: TransportLayer):
+    def __init__(self, name: str, steps: list[Step]):
         self.name = name
-        self.generator = generator
-        self.transport = transport
+        self.steps = list(steps)
 
     @abstractmethod
     def should_publish(self, event: Event) -> bool:
         """Whether this publisher handles the event at all."""
 
     def open(self):
-        self.transport.open()
+        for step in self.steps:
+            step.transport.open()
 
     def close(self):
-        self.transport.close()
+        for step in reversed(self.steps):
+            step.transport.close()
 
     def retrieve(self, location: Location) -> bytes:
         """The file served at the location's internal URL."""
@@ -152,27 +168,46 @@ class Publisher(ABC):
         except (OSError, ValueError) as e:  # URLError and HTTPError are OSErrors
             raise PublishError(f"Could not retrieve {location.retrieve_url}: {e}") from e
 
-    def publish(self, event: Event, deliveries: list[Delivery]) -> list[Delivery]:
-        """Run the generator and the transport; returns this publisher's
-        deliveries for the publishers after it."""
-        if not self.should_publish(event):
-            return []
-        if self.generator.needs_content(event):
+    def run_step(self, step: Step, event: Event, deliveries: list[Delivery]) -> list[Delivery]:
+        """Run one generator and its transport; returns the step's receipts."""
+        if step.generator.needs_content(event):
             deliveries = [
                 replace(d, content=self.retrieve(d.location)) if d.location else d
                 for d in deliveries
             ]
-        messages = self.generator.generate(event, deliveries)
-        locations = self.transport.send_many(messages)
-        return [Delivery(self.name, m, location) for m, location in zip(messages, locations)]
+        messages = step.generator.generate(event, deliveries)
+        if any(message.body is None for message in messages):
+            raise PublishError(f"Step {step.name} made a message without a body; use a delivery's content, not its body")
+        locations = step.transport.send_many(messages)
+        return [Delivery(self.name, m, location, step=step.name) for m, location in zip(messages, locations)]
+
+    def publish(self, event: Event, deliveries: list[Delivery] = (), *, done=(), previous=(), on_step=None) -> list[Delivery]:
+        """Run the steps not yet `done` (step names) in order, stopping at the
+        first error, and return all of this publisher's receipts for the event.
+
+        `deliveries` are its receipts so far, for resuming; `previous` are its
+        receipts from the station's last change; on_step(step, receipts) is
+        called after each step so that the progress can be saved."""
+        if not self.should_publish(event):
+            return []
+        deliveries = list(deliveries)
+        # a deletion stores nothing: it refers to what the last change stored
+        earlier = list(previous) if event.operation == Operation.DELETE else []
+        for step in self.steps:
+            if step.name in done:
+                continue
+            deliveries += self.run_step(step, event, earlier + deliveries)
+            if on_step:
+                on_step(step, deliveries)
+        return deliveries
 
     def undo(self, event: Event, deliveries: list[Delivery]) -> None:
-        """Remove what this publisher stored for an event that gave up.
-        `deliveries` are all of the event's receipts; only this publisher's
-        are touched, newest first. Errors are left to the caller to record."""
+        """Remove what this publisher stored for an event that gave up, newest
+        first. Errors are left to the caller to record."""
+        transports = {step.name: step.transport for step in self.steps}
         for delivery in reversed(deliveries):
             if delivery.publisher == self.name and delivery.location:
-                self.transport.remove(delivery.location)
+                transports[delivery.step].remove(delivery.location)
 
 
 class DefaultPublisher(Publisher):

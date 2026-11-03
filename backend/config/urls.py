@@ -1,3 +1,4 @@
+from django.apps import apps
 from django.contrib import admin
 from django.urls import include, path, re_path
 
@@ -15,3 +16,7 @@ urlpatterns = [
     # 放在根路径（而不是 /api/ 下）是为了让 WNM_STORAGE_URL 与 WIS2 惯例一致。
     path("webstorage/<str:filename>", WebstorageView.as_view(), name="webstorage"),
 ]
+
+# Publishing is an extra service: removing the app from INSTALLED_APPS switches it off
+if apps.is_installed("outbox"):
+    urlpatterns.append(path("api/publications/", include("outbox.urls")))

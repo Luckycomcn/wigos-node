@@ -8,6 +8,7 @@ export default {
     wsiRegistry: "WSI registry",
     mapSettings: "Map settings",
     stations: "My stations",
+    publications: "Publishing",
     tools: "Import / export",
     backToList: "Back to list",
   },

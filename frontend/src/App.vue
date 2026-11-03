@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import LoginPage from "./components/LoginPage.vue";
+import PublicationsPage from "./components/PublicationsPage.vue";
 import StationsList from "./components/StationsList.vue";
 import WmdrForm from "./components/WmdrForm.vue";
 import BatchWizard from "./components/batch/BatchWizard.vue";
@@ -49,6 +50,7 @@ const isStaff = computed(() => Boolean(user.value?.is_staff));
 // 那一行、又以为功能丢了）。导航条保持精简。
 const navItems = computed(() => [
   { value: "list", title: t("nav.stations"), icon: "mdi-format-list-bulleted" },
+  { value: "publications", title: t("nav.publications"), icon: "mdi-history" },
   { value: "tools", title: t("nav.tools"), icon: "mdi-database-arrow-up-down" },
 ]);
 
@@ -65,6 +67,7 @@ async function handleLogout() {
   await logout();
   view.value = { mode: "list" };
   selected.value = new Set();
+  failures.value = 0;
 }
 </script>
 
@@ -136,6 +139,27 @@ async function handleLogout() {
       </template>
     </v-app-bar>
 
+    <!-- Before the drawer, so that it spans the whole width below it. -->
+    <v-footer class="app-footer" height="12" app />
+
+    <v-navigation-drawer v-if="showNav" v-model="navOpen">
+      <v-list nav>
+        <v-list-item
+          v-for="item in NAV_ITEMS"
+          :key="item.mode"
+          :title="item.title"
+          :prepend-icon="item.icon"
+          :active="view.mode === item.mode"
+          color="primary"
+          @click="view = { mode: item.mode }"
+        >
+          <template v-if="item.mode === 'publications' && failures > 0" #append>
+            <v-chip size="x-small" color="error" variant="flat" :aria-label="`${failures} failed`">{{ failures }}</v-chip>
+          </template>
+        </v-list-item>
+      </v-list>
+    </v-navigation-drawer>
+
     <v-main>
       <v-container :class="['app-main', { 'app-main-wide': view.mode === 'batch' || view.mode === 'tools' || view.mode === 'registry' || view.mode === 'users' }]">
         <v-alert v-if="pending" class="mb-4" type="info" variant="tonal" density="compact" data-testid="locale-pending">
@@ -153,6 +177,7 @@ async function handleLogout() {
             @new="view = { mode: 'new' }"
             @edit="(stationId) => (view = { mode: 'edit', stationId })"
             @batch="(stationIds) => (view = { mode: 'batch', stationIds })"
+            @changed="refreshFailures"
           />
           <WmdrForm
             v-else-if="view.mode === 'new' || view.mode === 'edit'"
@@ -172,6 +197,7 @@ async function handleLogout() {
           <WsiRegistryPanel v-else-if="view.mode === 'registry'" @close="view = { mode: 'list' }" />
           <UserAdminPanel v-else-if="view.mode === 'users'" @close="view = { mode: 'list' }" />
           <MapManagerPanel v-else-if="view.mode === 'map'" @close="view = { mode: 'list' }" />
+          <PublicationsPage v-else-if="view.mode === 'publications'" @close="view = { mode: 'list' }" />
         </template>
       </v-container>
     </v-main>
@@ -182,14 +208,32 @@ async function handleLogout() {
 </template>
 
 <style scoped>
+/* The clouds, with the coloured stripe below them. The banner is white on the
+   left and blue on the right, so the title is dark and the user's details light. */
 .app-bar {
-  background: linear-gradient(135deg, #1d4ed8, #3b82f6) !important;
-  color: #fff !important;
+  background:
+    url("./assets/img/wmo-foot.png") bottom / 100% 12px no-repeat,
+    url("./assets/img/wmo-banner.png") top / 100% calc(100% - 12px) no-repeat,
+    #fff !important;
+  color: #003a78 !important;
   padding: 0 1rem;
 }
 
+.app-bar :deep(.v-toolbar__content) {
+  padding-bottom: 12px;
+}
+
+.app-bar-logo {
+  height: 72px;
+  margin-right: 1rem;
+}
+
+.app-bar-title {
+  text-shadow: 0 0 6px rgba(255, 255, 255, 0.9);
+}
+
 .app-bar-title h1 {
-  color: #fff;
+  color: #003a78;
   font-size: 1.4rem;
   font-weight: 700;
   margin: 0;
@@ -197,7 +241,7 @@ async function handleLogout() {
 
 .app-bar-title p {
   margin: 0.25rem 0 0;
-  color: #dbeafe;
+  color: #1f2f46;
   font-size: 0.9rem;
 }
 

@@ -5,7 +5,7 @@ import unittest
 import uuid
 from datetime import datetime, timezone
 
-from publishing.base import DefaultPublisher, Delivery, Location, Message, Operation, PublishError
+from publishing.base import Delivery, Location, Message, Operation, PublishError, Step
 from publishing.generators.wmdr2 import RecordFileGenerator
 from publishing.generators.wnm import (
     MAX_INLINE_CONTENT_SIZE,
@@ -13,7 +13,7 @@ from publishing.generators.wnm import (
     WNMGenerator,
     create_wnm,
 )
-from publishing.wmdr2 import render_record
+from publishing.wmdr2 import record_file_name, render_record
 
 from .test_base import FakeRetrievalPublisher, RecordingTransport, make_event
 
@@ -141,6 +141,12 @@ class WNMGeneratorTestCase(unittest.TestCase):
     def test_deletion_of_something_never_announced_sends_nothing(self):
         self.assertEqual(self.generate(Operation.DELETE, []), [])
 
+    def test_a_retry_repeats_the_same_data_id_and_pubtime(self):
+        first, second = self.generate(Operation.UPDATE, [self.stored]) + self.generate(Operation.UPDATE, [self.stored])
+        self.assertEqual(first["properties"]["data_id"], second["properties"]["data_id"])
+        self.assertEqual(first["properties"]["pubtime"], "2026-10-28T00:00:00Z")  # when the change was made
+        self.assertEqual(second["properties"]["pubtime"], first["properties"]["pubtime"])
+
     def test_message_is_a_geojson_wnm(self):
         [message] = self.generator.generate(make_event(wmdrv2=RECORD), [self.stored])
         self.assertEqual(message.media_type, "application/geo+json")
@@ -148,23 +154,23 @@ class WNMGeneratorTestCase(unittest.TestCase):
 
 
 class StorageThenWnmTestCase(unittest.TestCase):
-    """The two publishers as configured: the WNM describes what storage
-    serves, even when that differs from what was uploaded."""
+    """The steps as configured: the WNM describes what storage serves, even
+    when that differs from what was uploaded."""
 
     def test_integrity_comes_from_the_retrieved_file(self):
-        storage = DefaultPublisher(
-            "wis2-storage", RecordFileGenerator(centre_id="io-test"), RecordingTransport(url="http://store")
-        )
-        event = make_event(Operation.CREATE, wmdrv2=RECORD)
-        receipts = storage.publish(event, [])
-        url = receipts[0].location.url
-
+        url = f"http://store/{record_file_name(RECORD, 'io-test')}"
         served = CONTENT + b"\n"  # e.g. a storage that appends a newline
         notifications = RecordingTransport()
-        wnm_publisher = FakeRetrievalPublisher(
-            "wis2-wnm", WNMGenerator(centre_id="io-test"), notifications, files={url: served}
+        publisher = FakeRetrievalPublisher(
+            "wis2",
+            [
+                Step("storage", RecordFileGenerator(centre_id="io-test"), RecordingTransport(url="http://store")),
+                Step("wnm", WNMGenerator(centre_id="io-test"), notifications),
+            ],
+            files={url: served},
         )
-        wnm_publisher.publish(event, receipts)
+
+        publisher.publish(make_event(Operation.CREATE, wmdrv2=RECORD))
 
         [wnm] = [json.loads(m.body) for m in notifications.sent]
         self.assertEqual(wnm["links"][0]["href"], url)

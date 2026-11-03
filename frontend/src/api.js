@@ -117,8 +117,45 @@ export async function checkWigosIdentifiers(ids) {
   }));
   if (!res.ok) {
     throw new Error(translate("api.requestFailed", { status: res.status }));
+// What was published for the stations of the user's issuer groups, newest first.
+// Returns { count, next, previous, results }. filters: { status, attention, limit,
+// offset }; `attention` keeps the failures someone can still act on.
+export async function listPublications(filters = {}) {
+  const params = new URLSearchParams(Object.entries(filters).filter(([, value]) => value != null));
+  const res = handle401(await fetch(`${API_URL}/api/publications/?${params}`, { credentials: "include" }));
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.detail || `API request failed: ${res.status}`);
+  }
+  return data;
+}
+
+// Returns { [stationId]: { id, status, finished_at } }: each station's latest
+// event the user can see.
+export async function listLatestPublications() {
+  const res = handle401(await fetch(`${API_URL}/api/publications/latest/`, { credentials: "include" }));
+  if (!res.ok) {
+    throw new Error(`API request failed: ${res.status}`);
   }
   return res.json();
+}
+  }
+  return res.json();
+}
+
+// Publishes a failed event again; returns the updated event. A refusal (e.g. a
+// later change exists) is thrown with the reason.
+export async function retryPublication(eventId) {
+  const res = handle401(await fetch(`${API_URL}/api/publications/${encodeURIComponent(eventId)}/retry/`, {
+    method: "POST",
+    credentials: "include",
+    headers: csrfHeader(),
+  }));
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.detail || `API request failed: ${res.status}`);
+  }
+  return data;
 }
 
 export async function getCodelist(scheme) {

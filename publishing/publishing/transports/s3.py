@@ -53,7 +53,7 @@ class S3Transport(TransportLayer):
         # thread-safe, and connects on use, so open() can't fail on the network
         http_client = urllib3.PoolManager(
             maxsize=16,  # the worker's threads share the client
-            timeout=urllib3.Timeout(connect=timeout, read=timeout),
+            timeout=urllib3.Timeout(connect=min(timeout, 5), read=timeout),
             retries=urllib3.Retry(total=2, backoff_factor=0.5, status_forcelist=[500, 502, 503, 504]),
         )
         self.client = Minio(

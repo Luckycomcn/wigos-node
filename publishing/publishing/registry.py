@@ -1,20 +1,26 @@
 """Builds publishers from config dicts, e.g. the backend's settings.PUBLISHERS:
 
     {
-        "NAME": "wis2-wnm",                               # unique
+        "NAME": "wis2",                                   # unique
         "CLASS": "publishing.base.DefaultPublisher",      # optional, this default
-        "GENERATOR": {"CLASS": "...", "OPTIONS": {...}},  # OPTIONS optional
-        "TRANSPORT": {"CLASS": "...", "OPTIONS": {...}},
+        "STEPS": [                                        # run in this order
+            {
+                "NAME": "storage",                        # unique in the publisher
+                "GENERATOR": {"CLASS": "...", "OPTIONS": {...}},  # OPTIONS optional
+                "TRANSPORT": {"CLASS": "...", "OPTIONS": {...}},
+                "ENABLED": True,                          # optional
+            },
+        ],
         "ENABLED": True,                                  # optional
     }
 
 Classes are dotted paths, so a plugin can live in any importable package.
-Disabled entries are skipped without importing their classes (their
+Disabled publishers and steps are skipped without importing their classes (their
 dependencies may not be installed)."""
 
 from importlib import import_module
 
-from .base import MessageGenerator, Publisher, TransportLayer
+from .base import MessageGenerator, Publisher, Step, TransportLayer
 
 DEFAULT_PUBLISHER = "publishing.base.DefaultPublisher"
 
@@ -74,6 +80,32 @@ def _plugin(label, config, base, errors):
     return cls and _create(label, cls, errors, **options)
 
 
+def _steps(label, configs, errors):
+    """The enabled steps described by `configs`, in order."""
+    if not isinstance(configs, list) or not configs:
+        errors.append(f"{label}: STEPS must be a non-empty list")
+        return []
+    steps = []
+    names = set()
+    for index, config in enumerate(configs):
+        name = config.get("NAME") if isinstance(config, dict) else None
+        if not isinstance(name, str) or not name:
+            errors.append(f"{label} step {index}: NAME is required")
+            continue
+        if name in names:
+            errors.append(f"{label} step '{name}': NAME is used more than once")
+            continue
+        names.add(name)
+        if not config.get("ENABLED", True):
+            continue
+        step_label = f"{label} step '{name}'"
+        generator = _plugin(f"{step_label} GENERATOR", config.get("GENERATOR"), MessageGenerator, errors)
+        transport = _plugin(f"{step_label} TRANSPORT", config.get("TRANSPORT"), TransportLayer, errors)
+        if generator and transport:
+            steps.append(Step(name, generator, transport))
+    return steps
+
+
 def build_publishers(configs):
     """Publishers for the enabled entries of `configs`, in order. Raises
     ConfigurationError listing every problem found."""
@@ -94,10 +126,9 @@ def build_publishers(configs):
 
         label = f"Publisher '{name}'"
         publisher_cls = _load_class(label, config.get("CLASS", DEFAULT_PUBLISHER), Publisher, errors)
-        generator = _plugin(f"{label} GENERATOR", config.get("GENERATOR"), MessageGenerator, errors)
-        transport = _plugin(f"{label} TRANSPORT", config.get("TRANSPORT"), TransportLayer, errors)
-        if publisher_cls and generator and transport:
-            publisher = _create(label, publisher_cls, errors, name, generator, transport)
+        steps = _steps(label, config.get("STEPS"), errors)
+        if publisher_cls and steps:
+            publisher = _create(label, publisher_cls, errors, name, steps)
             if publisher:
                 publishers.append(publisher)
 

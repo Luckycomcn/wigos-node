@@ -7,6 +7,7 @@ export default {
     wsiRegistry: "WSI 注册表",
     mapSettings: "地图管理",
     stations: "我的台站",
+    publications: "发布",
     tools: "导入导出",
     backToList: "返回列表",
   },

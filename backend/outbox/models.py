@@ -14,7 +14,7 @@ class PublicationEvent(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending"
         PROCESSING = "processing"  # claimed by a worker
-        PROCESSED = "processed"  # every publisher ran (our broker accepted the WNM)
+        PROCESSED = "processed"  # every publisher ran (the WNM was sent, not yet confirmed)
         FAILED = "failed"  # gave up after the last attempt
         PUBLISHED = "published"  # the WNM came back from upstream (MQTT listener)
 
@@ -47,8 +47,11 @@ class PublicationEvent(models.Model):
 
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING)
     locked_until = models.DateTimeField(null=True, blank=True)  # lease of the worker on it
-    completed = ArrayField(models.CharField(max_length=255), default=list, blank=True)  # publisher names
-    deliveries = models.JSONField(default=list, blank=True)  # receipts of the completed publishers
+    completed = ArrayField(models.CharField(max_length=255), default=list, blank=True)  # <publisher>:<step>
+    deliveries = models.JSONField(default=list, blank=True)  # receipts of the completed steps
+    # failed, and its undo failed too: something may be left behind, so it
+    # holds its station until an admin cleans it up
+    needs_cleanup = models.BooleanField(default=False)
     attempts = models.PositiveIntegerField(default=0)
     next_attempt_at = models.DateTimeField(null=True, blank=True)  # None: as soon as possible
     last_error = models.TextField(blank=True)

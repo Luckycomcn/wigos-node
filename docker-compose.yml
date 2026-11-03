@@ -76,6 +76,35 @@ services:
         condition: service_started
       minio:
         condition: service_healthy
+      mosquitto:
+        condition: service_healthy
+
+  # MQTT broker the WNMs are published to. A production deployment points
+  # WIS2_BROKER_URL at its own broker, or sets WIS2_PUBLISH_WNM=false.
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    environment:
+      MQTT_USERNAME: ${MQTT_USERNAME:-wis2}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-wis2}
+    command:
+      - sh
+      - -c
+      - |
+        touch /mosquitto/passwd
+        chmod 600 /mosquitto/passwd
+        mosquitto_passwd -b /mosquitto/passwd "$$MQTT_USERNAME" "$$MQTT_PASSWORD"
+        chown mosquitto:mosquitto /mosquitto/passwd
+        exec mosquitto -c /mosquitto/config/mosquitto.conf
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    ports:
+      - "1883:1883"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 1883"]
+      interval: 5s
+      timeout: 1s
+      retries: 3
 
   # Web storage for the published record files (WIS2): the publisher stores
   # them, WNMs link to them. The S3 API is on 9000, the console on 9001. In
