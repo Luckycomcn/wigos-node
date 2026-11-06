@@ -50,7 +50,9 @@ const isStaff = computed(() => Boolean(user.value?.is_staff));
 const NAV_ITEMS = computed(() => [
   { mode: "list", title: t("nav.stations"), icon: "mdi-map-marker-multiple" },
   { mode: "publications", title: t("nav.publications"), icon: "mdi-history" },
-  { mode: "tools", title: t("nav.tools"), icon: "mdi-database-arrow-up-down" },
+  // `mdi-database-arrow-up-down` 不在 @mdi/font 7.4.47 里，写了也是空白
+  // 字形，页面上看起来就是"这一项没有图标"。换成确实存在的双向箭头。
+  { mode: "tools", title: t("nav.tools"), icon: "mdi-swap-horizontal" },
 ]);
 
 // 侧栏只服务于上面这三页；表单、批量向导、以及从「管理」菜单进入的面板页
@@ -267,11 +269,9 @@ async function handleLogout() {
   font-size: 0.9rem;
 }
 
-/* 顶栏右半是深蓝 banner 的一部分，文字与按钮必须是浅色才看得清。 */
-.app-bar-user {
-  color: #fff;
-  text-shadow: 0 0 4px rgba(0, 58, 120, 0.9);
-}
+/* 顶栏右上角那几个元素（邮箱、语言切换、「管理」、「退出」）共用 .app-bar-user，
+   具体配色在 app.css 里统一定义 —— 语言切换在子组件里，scoped 样式到不了，
+   写在那边只能命中它的根元素，会出现"一颗白字、两颗深字"的错位。 */
 
 .app-footer {
   background: url("./assets/img/wmo-foot.png") center / 100% 100% no-repeat;

@@ -14,9 +14,10 @@ const current = computed(() => locales.find((locale) => locale.code === selected
 <template>
   <v-menu location="bottom end" offset="8">
     <template #activator="{ props: activator }">
+      <!-- class 与「管理」「退出」共用，顶栏配色在 app.css 里统一定义。 -->
       <v-btn
         v-bind="activator"
-        class="locale-button"
+        class="locale-button app-bar-user"
         variant="tonal"
         prepend-icon="mdi-translate"
         :aria-label="t('locale.switch')"

@@ -120,3 +120,22 @@ h3 {
 .leaflet-offline-basemap {
   background-color: #dceaf7;
 }
+
+/* 顶栏右上角那一组：邮箱、「语言切换」、「管理」、「退出」。
+   banner 的右半是深蓝，所以文字必须浅色才看得清。语言切换在
+   LocaleSwitcher 子组件里，各页面的 scoped 样式够不到它内部的 v-btn，
+   因此这条规则放在全局，让三颗按钮始终是同一套外观 —— 否则 tonal 自带的
+   淡蓝底会让语言按钮比旁边两颗亮一档，并排时一眼就能看出不齐。 */
+.app-bar-user {
+  color: #fff;
+  text-shadow: 0 0 4px rgba(0, 58, 120, 0.9);
+}
+
+.app-bar-user.v-btn {
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.42);
+}
+
+.app-bar-user.v-btn:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
