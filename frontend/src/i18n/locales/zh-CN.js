@@ -10,6 +10,8 @@ export default {
     publications: "发布",
     tools: "导入导出",
     backToList: "返回列表",
+    toggleMenu: "展开或收起菜单",
+    failedCount: "{count} 条失败",
   },
   app: {
     title: "WMDR 台站记录构建器",

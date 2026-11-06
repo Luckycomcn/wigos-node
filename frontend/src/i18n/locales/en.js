@@ -11,6 +11,8 @@ export default {
     publications: "Publishing",
     tools: "Import / export",
     backToList: "Back to list",
+    toggleMenu: "Toggle the menu",
+    failedCount: "{count} failed",
   },
   app: {
     title: "WMDR Station Record Builder",

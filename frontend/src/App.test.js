@@ -16,7 +16,7 @@ let warn;
 function mountApp(status = "authenticated") {
   useAuth.mockReturnValue({
     status: ref(status),
-    user: ref({ username: "someone", email: "someone@example.com" }),
+    user: ref({ username: "someone", email: "someone@example.com", is_staff: true }),
     setUser: vi.fn(),
     logout: vi.fn(),
   });
@@ -29,6 +29,10 @@ function mountApp(status = "authenticated") {
         WmdrForm: { template: '<div class="form-page" />', emits: ["saved", "cancel"] },
         BatchWizard: { template: '<div class="batch-page" />', emits: ["applied", "close"] },
         PublicationsPage: { template: '<div class="publications-page" />', emits: ["changed"] },
+        ToolsPanel: { template: '<div class="tools-page" />', emits: ["close", "imported"] },
+        WsiRegistryPanel: { template: '<div class="registry-page" />', emits: ["close", "changed"] },
+        UserAdminPanel: { template: '<div class="users-page" />', emits: ["close"] },
+        MapManagerPanel: { template: '<div class="map-page" />', emits: ["close"] },
       },
     },
     attachTo: document.body,
@@ -58,16 +62,25 @@ describe("App sidebar", () => {
     await mountApp();
     expect(hasSidebar()).toBe(true);
     expect(wrapper.find(".stations-page").exists()).toBe(true);
-    expect(navItem("Stations").classes()).toContain("v-list-item--active");
+    expect(navItem("My stations").classes()).toContain("v-list-item--active");
 
     await navItem("Publishing").trigger("click");
     expect(wrapper.find(".publications-page").exists()).toBe(true);
     expect(wrapper.find(".stations-page").exists()).toBe(false);
     expect(navItem("Publishing").classes()).toContain("v-list-item--active");
-    expect(navItem("Stations").classes()).not.toContain("v-list-item--active");
+    expect(navItem("My stations").classes()).not.toContain("v-list-item--active");
 
-    await navItem("Stations").trigger("click");
+    await navItem("My stations").trigger("click");
     expect(wrapper.find(".stations-page").exists()).toBe(true);
+  });
+
+  it("keeps importing and exporting beside the main pages", async () => {
+    await mountApp();
+    expect(navItem("Import / export")).toBeTruthy();
+
+    await navItem("Import / export").trigger("click");
+    expect(wrapper.find(".tools-page").exists()).toBe(true);
+    expect(navItem("Import / export").classes()).toContain("v-list-item--active");
   });
 
   it("isn't there on the station form or the batch wizard", async () => {
@@ -88,6 +101,21 @@ describe("App sidebar", () => {
     expect(hasSidebar()).toBe(false);
   });
 
+  it("isn't there on the pages reached from the Manage menu", async () => {
+    await mountApp();
+    const { go } = wrapper.vm.$.setupState;
+    for (const [mode, selector] of [
+      ["users", ".users-page"],
+      ["registry", ".registry-page"],
+      ["map", ".map-page"],
+    ]) {
+      go(mode);
+      await flushPromises();
+      expect(wrapper.find(selector).exists()).toBe(true);
+      expect(hasSidebar()).toBe(false);
+    }
+  });
+
   it("isn't there before logging in", async () => {
     await mountApp("anonymous");
     expect(wrapper.find(".login-page").exists()).toBe(true);
@@ -99,7 +127,7 @@ describe("App sidebar", () => {
     await mountApp();
     expect(listPublications).toHaveBeenCalledWith({ attention: 1, limit: 1 });
     expect(navItem("Publishing3")).toBeTruthy();
-    expect(navItem("Stations")).toBeTruthy();
+    expect(navItem("My stations")).toBeTruthy();
   });
 
   it("shows no counter without failures", async () => {

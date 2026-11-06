@@ -1,6 +1,7 @@
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { listPublications } from "./api";
 import LoginPage from "./components/LoginPage.vue";
 import PublicationsPage from "./components/PublicationsPage.vue";
 import StationsList from "./components/StationsList.vue";
@@ -35,7 +36,7 @@ const { status, user, setUser, logout } = useAuth();
 // 页面级视图。原来只有 list / new / edit / batch 四种，工具、用户管理、
 // WSI 注册表都挤在列表页的按钮里、以对话框打开 —— 那几块是独立的完整
 // 功能，各自有表格、筛选、分页，塞进 980px 的弹窗里既看不清也不像"一个
-// 地方可以长期停留"的页面。现在它们各占一个顶级导航项。
+// 地方可以长期停留"的页面。现在它们各占一个页面。
 const view = ref({ mode: "list" });
 const passwordOpen = ref(false);
 // Station IDs ticked in the list; kept here so they survive the batch wizard.
@@ -43,16 +44,22 @@ const selected = ref(new Set());
 
 const isStaff = computed(() => Boolean(user.value?.is_staff));
 
-// 顶部导航项。这里只放"日常操作"两页：我的台站、导入导出。
-// 用户管理 / WSI 注册表 / 地图管理都是"配置性质、偶尔进一次"的管理动作，
-// 统一收进右上角的「管理」菜单——它们若同时出现在导航条和菜单里就是重复入口
-// （上一版正是如此，导航条第二行既有它们、菜单里也有，用户看不到白底白字的
-// 那一行、又以为功能丢了）。导航条保持精简。
-const navItems = computed(() => [
-  { value: "list", title: t("nav.stations"), icon: "mdi-format-list-bulleted" },
-  { value: "publications", title: t("nav.publications"), icon: "mdi-history" },
-  { value: "tools", title: t("nav.tools"), icon: "mdi-database-arrow-up-down" },
+// 左侧导航项：与英文版一致，只放三块"日常操作"——我的台站、发布、导入导出。
+// 用户管理 / WSI 注册表 / 地图管理是"配置性质、偶尔进一次"的管理动作，
+// 统一收进右上角的「管理」菜单，避免导航栏和菜单出现重复入口。
+const NAV_ITEMS = computed(() => [
+  { mode: "list", title: t("nav.stations"), icon: "mdi-map-marker-multiple" },
+  { mode: "publications", title: t("nav.publications"), icon: "mdi-history" },
+  { mode: "tools", title: t("nav.tools"), icon: "mdi-database-arrow-up-down" },
 ]);
+
+// 侧栏只服务于上面这三页；表单、批量向导、以及从「管理」菜单进入的面板页
+// 都自带返回入口，和英文版对表单/向导的处理保持一致。
+const showNav = computed(
+  () => status.value === "authenticated" && NAV_ITEMS.value.some((item) => item.mode === view.value.mode)
+);
+// null: open on large screens, closed on small ones (Vuetify's default)
+const navOpen = ref(null);
 
 // 当前高亮的导航项：新建/编辑/批量都属于"我的台站"这个区。
 const activeNav = computed(() =>
@@ -62,6 +69,33 @@ const activeNav = computed(() =>
 function go(mode) {
   view.value = { mode };
 }
+
+// Failures someone can still act on, on the Publishing item. It only shows with
+// the sidebar, so it is only kept up to date then.
+const FAILURES_REFRESH_MS = 30000;
+const failures = ref(0);
+let failuresTimer = null;
+let failuresRequests = 0;
+
+async function refreshFailures() {
+  const request = ++failuresRequests;
+  try {
+    const { count } = await listPublications({ attention: 1, limit: 1 });
+    // A slower, older answer must not replace a newer one.
+    if (request === failuresRequests) failures.value = count;
+  } catch {
+    // keeps the last number: the rest of the app works without it
+  }
+}
+
+watch(showNav, (shown) => {
+  clearInterval(failuresTimer);
+  if (shown) {
+    refreshFailures();
+    failuresTimer = setInterval(refreshFailures, FAILURES_REFRESH_MS);
+  }
+}, { immediate: true });
+onUnmounted(() => clearInterval(failuresTimer));
 
 async function handleLogout() {
   await logout();
@@ -73,23 +107,33 @@ async function handleLogout() {
 
 <template>
   <v-app>
-    <v-app-bar class="app-bar" height="88" flat extended extension-height="48">
+    <v-app-bar class="app-bar" height="100" flat>
+      <template v-if="showNav" #prepend>
+        <v-app-bar-nav-icon :aria-label="t('nav.toggleMenu')" @click="navOpen = !navOpen" />
+      </template>
+      <img class="app-bar-logo" src="./assets/img/logo.png" alt="WMO logo" />
       <div class="app-bar-title">
         <h1>{{ t("app.title") }}</h1>
-        <p>{{ t("app.subtitle") }}</p>
+        <!-- On narrower screens it would run into the dark part of the banner. -->
+        <p class="d-none d-lg-block">{{ t("app.subtitle") }}</p>
       </div>
       <template #append>
         <LocaleSwitcher />
         <template v-if="status === 'authenticated'">
-          <span class="mr-3 ml-4">{{ user.email || user.username }}</span>
+          <span class="app-bar-user mr-3 ml-4">{{ user.email || user.username }}</span>
           <!--
-            "修改密码"原来是一个独立按钮，但它跟用户管理、WSI 注册表是同类的
-            "管理自己的账号 / 数据"动作，散在顶栏里很难被发现。收进一个「管理」
-            菜单，语义清楚，也不会随功能增加把顶栏挤爆。
+            用户管理 / WSI 注册表 / 地图管理 / 修改密码都是"配置性质、偶尔进一次"
+            的动作，统一收进「管理」菜单，语义清楚，也不会随功能增加把顶栏挤爆。
           -->
           <v-menu>
             <template #activator="{ props: menuProps }">
-              <v-btn v-bind="menuProps" variant="tonal" prepend-icon="mdi-cog-outline" append-icon="mdi-menu-down">
+              <v-btn
+                v-bind="menuProps"
+                class="app-bar-user"
+                variant="tonal"
+                prepend-icon="mdi-cog-outline"
+                append-icon="mdi-menu-down"
+              >
                 {{ t("nav.manage") }}
               </v-btn>
             </template>
@@ -112,30 +156,8 @@ async function handleLogout() {
               </v-list-item>
             </v-list>
           </v-menu>
-          <v-btn variant="tonal" @click="handleLogout">{{ t("app.logout") }}</v-btn>
+          <v-btn class="app-bar-user" variant="tonal" @click="handleLogout">{{ t("app.logout") }}</v-btn>
         </template>
-      </template>
-
-      <!--
-        功能页之间的切换靠这条 tab 栏，而不是列表页里的一排按钮。
-        必须放进 v-app-bar 的 #extension 槽里，不能直接摆在 <v-app-bar> 和
-        <v-main> 之间：v-app-bar 是 position:fixed，脱离文档流，紧跟其后的
-        兄弟元素会从 y=0 开始排布并被顶栏**盖住** —— 视觉上看着「有一行、但
-        点不动」，而且 v-main 的顶部偏移只算了顶栏，还会再和它重叠一次。
-        extension 槽由 Vuetify 自己算高度并同步给 v-main。
-      -->
-      <template #extension>
-        <v-tabs
-          v-if="status === 'authenticated'"
-          :model-value="activeNav"
-          class="nav-tabs"
-          density="compact"
-          @update:model-value="go"
-        >
-          <v-tab v-for="item in navItems" :key="item.value" :value="item.value" :prepend-icon="item.icon">
-            {{ item.title }}
-          </v-tab>
-        </v-tabs>
       </template>
     </v-app-bar>
 
@@ -149,12 +171,12 @@ async function handleLogout() {
           :key="item.mode"
           :title="item.title"
           :prepend-icon="item.icon"
-          :active="view.mode === item.mode"
+          :active="activeNav === item.mode"
           color="primary"
-          @click="view = { mode: item.mode }"
+          @click="go(item.mode)"
         >
           <template v-if="item.mode === 'publications' && failures > 0" #append>
-            <v-chip size="x-small" color="error" variant="flat" :aria-label="`${failures} failed`">{{ failures }}</v-chip>
+            <v-chip size="x-small" color="error" variant="flat" :aria-label="t('nav.failedCount', { count: failures })">{{ failures }}</v-chip>
           </template>
         </v-list-item>
       </v-list>
@@ -197,7 +219,7 @@ async function handleLogout() {
           <WsiRegistryPanel v-else-if="view.mode === 'registry'" @close="view = { mode: 'list' }" />
           <UserAdminPanel v-else-if="view.mode === 'users'" @close="view = { mode: 'list' }" />
           <MapManagerPanel v-else-if="view.mode === 'map'" @close="view = { mode: 'list' }" />
-          <PublicationsPage v-else-if="view.mode === 'publications'" @close="view = { mode: 'list' }" />
+          <PublicationsPage v-else-if="view.mode === 'publications'" @changed="refreshFailures" />
         </template>
       </v-container>
     </v-main>
@@ -245,26 +267,15 @@ async function handleLogout() {
   font-size: 0.9rem;
 }
 
-/* 导航条在顶栏的 extension 区里。背景是浅色，但 `.app-bar` 上的
-   `color:#fff !important` 会一路继承进 extension —— 上一版正是这样变成
-   "白底白字、整行看不见"。这里必须显式把文字颜色改回深色，不能指望继承。
-   v-tab 自身的颜色由 Vuetify 的 color/oncolor 控制，这里只兜住容器文字。 */
-.nav-tabs {
-  background: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
-  padding: 0 1rem;
-  flex: 1 1 auto;
-  height: 48px;
-  color: #334155 !important;
+/* 顶栏右半是深蓝 banner 的一部分，文字与按钮必须是浅色才看得清。 */
+.app-bar-user {
+  color: #fff;
+  text-shadow: 0 0 4px rgba(0, 58, 120, 0.9);
 }
 
-.nav-tabs :deep(.v-tab) {
-  color: #475569;
-  opacity: 1;
-}
-
-.nav-tabs :deep(.v-tab--selected) {
-  color: #1d4ed8;
+.app-footer {
+  background: url("./assets/img/wmo-foot.png") center / 100% 100% no-repeat;
+  padding: 0;
 }
 
 .app-main {
