@@ -7,6 +7,10 @@ export default {
     logout: "Log out",
     loading: "Loading…",
   },
+  nav: {
+    stations: "Stations",
+    publishing: "Publishing",
+  },
   login: {
     title: "Sign in",
     identifier: "Email or username",

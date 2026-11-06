@@ -35,8 +35,8 @@ const selected = ref(new Set());
 
 // The sidebar is for the main pages; the form and the wizard have their own way out.
 const NAV_ITEMS = [
-  { mode: "list", title: "Stations", icon: "mdi-map-marker-multiple" },
-  { mode: "publications", title: "Publishing", icon: "mdi-history" },
+  { mode: "list", titleKey: "nav.stations", icon: "mdi-map-marker-multiple" },
+  { mode: "publications", titleKey: "nav.publishing", icon: "mdi-history" },
 ];
 const showNav = computed(() => status.value === "authenticated" && NAV_ITEMS.some((item) => item.mode === view.value.mode));
 // null: open on large screens, closed on small ones (Vuetify's default)
@@ -90,11 +90,16 @@ async function handleLogout() {
         <p class="d-none d-lg-block">{{ t("app.subtitle") }}</p>
       </div>
       <template #append>
-        <LocaleSwitcher />
-        <template v-if="status === 'authenticated'">
-          <span class="app-bar-user mr-3">{{ user.email || user.username }}</span>
-          <v-btn class="app-bar-user" variant="tonal" @click="handleLogout">{{ t("app.logout") }}</v-btn>
-        </template>
+        <div class="app-bar-actions">
+          <div v-if="status === 'authenticated'" class="app-bar-account">
+            <span class="app-bar-user">{{ user.email || user.username }}</span>
+            <v-divider vertical class="app-bar-account-divider" aria-hidden="true" />
+            <v-btn class="app-bar-user" variant="tonal" @click="handleLogout">{{ t("app.logout") }}</v-btn>
+          </div>
+          <div class="app-bar-locale">
+            <LocaleSwitcher />
+          </div>
+        </div>
       </template>
     </v-app-bar>
 
@@ -106,7 +111,7 @@ async function handleLogout() {
         <v-list-item
           v-for="item in NAV_ITEMS"
           :key="item.mode"
-          :title="item.title"
+          :title="t(item.titleKey)"
           :prepend-icon="item.icon"
           :active="view.mode === item.mode"
           color="primary"
@@ -200,6 +205,24 @@ async function handleLogout() {
 .app-bar-user {
   color: #fff;
   text-shadow: 0 0 4px rgba(0, 58, 120, 0.9);
+}
+
+.app-bar-actions,
+.app-bar-account {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.app-bar-account-divider {
+  border-color: rgba(255, 255, 255, 0.6);
+  opacity: 1;
+  height: 28px;
+}
+
+.app-bar-locale {
+  border-left: 1px solid rgba(255, 255, 255, 0.6);
+  padding-left: 1rem;
 }
 
 .app-footer {

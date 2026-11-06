@@ -6,6 +6,7 @@ import { createVuetify } from "vuetify";
 import App from "./App.vue";
 import { listPublications } from "./api";
 import { useAuth } from "./composables/useAuth";
+import { useLocale } from "./composables/useLocale";
 
 vi.mock("./composables/useAuth", () => ({ useAuth: vi.fn() }));
 vi.mock("./api", () => ({ listPublications: vi.fn() }));
@@ -41,6 +42,7 @@ const navItem = (title) => wrapper.findAll(".v-navigation-drawer .v-list-item").
 const stations = () => wrapper.findComponent(".stations-page");
 
 beforeEach(() => {
+  useLocale().setLocale("en");
   warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   listPublications.mockReset();
   listPublications.mockResolvedValue({ count: 0, results: [] });
@@ -70,6 +72,24 @@ describe("App sidebar", () => {
     expect(wrapper.find(".stations-page").exists()).toBe(true);
   });
 
+  it("translates the sidebar labels into Chinese", async () => {
+    await mountApp();
+
+    useLocale().setLocale("zh-CN");
+    await flushPromises();
+
+    expect(navItem("台站")).toBeTruthy();
+    expect(navItem("发布")).toBeTruthy();
+  });
+
+  it("separates the locale selector from authenticated account controls", async () => {
+    await mountApp();
+
+    expect(wrapper.find(".app-bar-account + .app-bar-locale").exists()).toBe(true);
+    expect(wrapper.find(".app-bar-account-divider").exists()).toBe(true);
+    expect(wrapper.find(".app-bar-locale .locale-button").attributes("aria-label")).toBe("Language");
+  });
+
   it("isn't there on the station form or the batch wizard", async () => {
     await mountApp();
 
@@ -92,6 +112,8 @@ describe("App sidebar", () => {
     await mountApp("anonymous");
     expect(wrapper.find(".login-page").exists()).toBe(true);
     expect(hasSidebar()).toBe(false);
+    expect(wrapper.find(".app-bar-locale .locale-button").exists()).toBe(true);
+    expect(wrapper.find(".app-bar-account").exists()).toBe(false);
   });
 
   it("counts the failures that need attention on the Publishing item", async () => {
