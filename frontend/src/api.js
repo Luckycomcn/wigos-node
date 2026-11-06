@@ -117,6 +117,10 @@ export async function checkWigosIdentifiers(ids) {
   }));
   if (!res.ok) {
     throw new Error(translate("api.requestFailed", { status: res.status }));
+  }
+  return res.json();
+}
+
 // What was published for the stations of the user's issuer groups, newest first.
 // Returns { count, next, previous, results }. filters: { status, attention, limit,
 // offset }; `attention` keeps the failures someone can still act on.
@@ -136,9 +140,6 @@ export async function listLatestPublications() {
   const res = handle401(await fetch(`${API_URL}/api/publications/latest/`, { credentials: "include" }));
   if (!res.ok) {
     throw new Error(`API request failed: ${res.status}`);
-  }
-  return res.json();
-}
   }
   return res.json();
 }
