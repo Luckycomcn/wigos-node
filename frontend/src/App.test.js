@@ -91,7 +91,8 @@ it("keeps importing and exporting beside the main pages", async () => {
     useLocale().setLocale("zh-CN");
     await flushPromises();
 
-    expect(navItem("台站")).toBeTruthy();
+    // 导航第一项对应 nav.stations，中文译为「我的台站」，与英文的 My stations 一致。
+    expect(navItem("我的台站")).toBeTruthy();
     expect(navItem("发布")).toBeTruthy();
     expect(navItem("导入导出")).toBeTruthy();
   });

@@ -1,16 +1,18 @@
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import {
   archiveStation,
   deleteStation,
   exportStation,
   exportStations,
+  listLatestPublications,
   listMyStations,
   publishStation,
   restoreStation,
   submitStation,
 } from "../api";
+import PublicationStatusChip from "./PublicationStatusChip.vue";
 import StationsMap from "./StationsMap.vue";
 import SelectionBar from "./SelectionBar.vue";
 import HistoryDialog from "./HistoryDialog.vue";
@@ -26,6 +28,7 @@ const headers = computed(() => [
   { title: t("list.columnWsi"), key: "wsi" },
   { title: t("list.columnName"), key: "name" },
   { title: t("list.columnState"), key: "state", sortable: false },
+  { title: t("list.columnPublishing"), key: "publishing", sortable: false },
   { title: "", key: "actions", sortable: false, align: "end" },
 ]);
 
@@ -83,6 +86,38 @@ watch(search, () => {
 });
 watch([statusFilter, pageSize, showArchived], () => reload());
 watch(page, () => load());
+
+// 每个台站最近一次发布的状态。挑出一列显示，让"提交成功"与"真的发出去了"
+// 不再混在一起 —— 台站本身提交过，并不代表它的变更已经送到 WIS2。
+// 没有条目的台站不显示：要么还没改过，要么这条记录用户无权看。
+// pending / processing 期间每 5 秒重取一次，走到终态就停，避免空转。
+const REFRESH_MS = 5000;
+const latest = ref({});
+let latestTimer = null;
+let left = false;
+
+async function loadLatest() {
+  try {
+    const data = await listLatestPublications();
+    // 组件已经卸载：这次结果没人要了，也不能再排下一轮，
+    // 否则会留下一个永远在跑的定时器。
+    if (left) return;
+    latest.value = data;
+    emit("changed");
+  } catch {
+    return; // 状态列取不到时，列表本身照常可用
+  }
+  const inFlight = Object.values(latest.value).some(
+    ({ status }) => status === "pending" || status === "processing"
+  );
+  if (inFlight) latestTimer = setTimeout(loadLatest, REFRESH_MS);
+}
+loadLatest();
+
+onUnmounted(() => {
+  left = true;
+  clearTimeout(latestTimer);
+});
 
 async function run(action, successMessage) {
   busy.value = true;
@@ -248,6 +283,13 @@ const rowProps = ({ item }) => ({ class: selectedIds.value.includes(item.station
           <v-chip v-if="item.status === 'draft'" size="small" color="warning" variant="flat">{{ t("list.statusDraft") }}</v-chip>
           <v-chip v-else-if="item.archived" size="small" color="warning" variant="tonal">{{ t("list.statusArchived") }}</v-chip>
           <v-chip v-else size="small" color="success" variant="tonal">{{ t("list.statusActive") }}</v-chip>
+        </template>
+        <template #[`item.publishing`]="{ item }">
+          <PublicationStatusChip
+            v-if="latest[item.station_id]"
+            class="publishing-status"
+            :status="latest[item.station_id].status"
+          />
         </template>
         <template #[`item.actions`]="{ item }">
           <div class="d-flex ga-1 justify-end flex-wrap">

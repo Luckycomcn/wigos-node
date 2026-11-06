@@ -48,21 +48,21 @@ describe("StationsList publishing status", () => {
       2: { id: 8, status: "failed", finished_at: null },
     });
     await mountList();
-    expect(row("Alpha").find(".v-chip").text()).toBe("Processed");
-    expect(row("Beta").find(".v-chip").text()).toBe("Publishing failed");
+    expect(row("Alpha").find(".publishing-status").text()).toBe("Processed");
+    expect(row("Beta").find(".publishing-status").text()).toBe("Publishing failed");
   });
 
   it("shows no chip for a station without a status the user may see", async () => {
     listLatestPublications.mockResolvedValue({ 1: { id: 9, status: "processed", finished_at: null } });
     await mountList();
-    expect(row("Gamma").find(".v-chip").exists()).toBe(false);
+    expect(row("Gamma").find(".publishing-status").exists()).toBe(false);
   });
 
   it("still lists the stations when the statuses can't be loaded", async () => {
     listLatestPublications.mockRejectedValue(new Error("nope"));
     await mountList();
     expect(wrapper.findAll("tbody tr")).toHaveLength(3);
-    expect(wrapper.find("tbody .v-chip").exists()).toBe(false);
+    expect(wrapper.find("tbody .publishing-status").exists()).toBe(false);
     expect(wrapper.text()).not.toContain("nope");
   });
 
@@ -70,11 +70,11 @@ describe("StationsList publishing status", () => {
     vi.useFakeTimers();
     listLatestPublications.mockResolvedValue({ 1: { id: 9, status: "pending", finished_at: null } });
     await mountList();
-    expect(row("Alpha").find(".v-chip").text()).toBe("Pending");
+    expect(row("Alpha").find(".publishing-status").text()).toBe("Pending");
 
     listLatestPublications.mockResolvedValue({ 1: { id: 9, status: "processed", finished_at: null } });
     await vi.advanceTimersByTimeAsync(5000);
-    expect(row("Alpha").find(".v-chip").text()).toBe("Processed");
+    expect(row("Alpha").find(".publishing-status").text()).toBe("Processed");
 
     await vi.advanceTimersByTimeAsync(30000);
     expect(listLatestPublications).toHaveBeenCalledTimes(2);

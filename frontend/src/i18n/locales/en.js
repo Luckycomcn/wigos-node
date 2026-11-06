@@ -119,6 +119,7 @@ export default {
     columnWsi: "WIGOS identifier",
     columnName: "Name",
     columnState: "State",
+    columnPublishing: "Publishing",
     edit: "Edit",
     selectAria: "Select {name}",
     noPermission: "You don't have permission to edit this station",

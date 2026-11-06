@@ -115,6 +115,7 @@ export default {
     columnWsi: "WIGOS 标识符",
     columnName: "名称",
     columnState: "状态",
+    columnPublishing: "发布",
     edit: "编辑",
     selectAria: "选择 {name}",
     noPermission: "您没有编辑该台站的权限",
