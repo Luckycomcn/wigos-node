@@ -47,6 +47,7 @@ const isStaff = computed(() => Boolean(user.value?.is_staff));
 // 左侧导航项：与英文版一致，只放三块"日常操作"——我的台站、发布、导入导出。
 // 用户管理 / WSI 注册表 / 地图管理是"配置性质、偶尔进一次"的管理动作，
 // 统一收进右上角的「管理」菜单，避免导航栏和菜单出现重复入口。
+// 标题走 t() 而不是存成裸键名，切换语言时不用重新计算列表。
 const NAV_ITEMS = computed(() => [
   { mode: "list", title: t("nav.stations"), icon: "mdi-map-marker-multiple" },
   { mode: "publications", title: t("nav.publications"), icon: "mdi-history" },
@@ -120,46 +121,56 @@ async function handleLogout() {
         <p class="d-none d-lg-block">{{ t("app.subtitle") }}</p>
       </div>
       <template #append>
-        <LocaleSwitcher />
-        <template v-if="status === 'authenticated'">
-          <span class="app-bar-user mr-3 ml-4">{{ user.email || user.username }}</span>
-          <!--
-            用户管理 / WSI 注册表 / 地图管理 / 修改密码都是"配置性质、偶尔进一次"
-            的动作，统一收进「管理」菜单，语义清楚，也不会随功能增加把顶栏挤爆。
-          -->
-          <v-menu>
-            <template #activator="{ props: menuProps }">
-              <v-btn
-                v-bind="menuProps"
-                class="app-bar-user"
-                variant="tonal"
-                prepend-icon="mdi-cog-outline"
-                append-icon="mdi-menu-down"
-              >
-                {{ t("nav.manage") }}
-              </v-btn>
-            </template>
-            <v-list density="compact">
-              <v-list-item prepend-icon="mdi-lock-reset" @click="passwordOpen = true">
-                <v-list-item-title>{{ t("nav.changePassword") }}</v-list-item-title>
-              </v-list-item>
-              <v-list-item
-                v-if="isStaff"
-                prepend-icon="mdi-account-group-outline"
-                @click="go('users')"
-              >
-                <v-list-item-title>{{ t("nav.users") }}</v-list-item-title>
-              </v-list-item>
-              <v-list-item prepend-icon="mdi-shield-key-outline" @click="go('registry')">
-                <v-list-item-title>{{ t("nav.wsiRegistry") }}</v-list-item-title>
-              </v-list-item>
-              <v-list-item prepend-icon="mdi-map-outline" @click="go('map')">
-                <v-list-item-title>{{ t("nav.mapSettings") }}</v-list-item-title>
-              </v-list-item>
-            </v-list>
-          </v-menu>
-          <v-btn class="app-bar-user" variant="tonal" @click="handleLogout">{{ t("app.logout") }}</v-btn>
-        </template>
+        <!--
+          分成两组：账号相关（邮箱 / 「管理」 / 「退出」）在左，语言切换在右，
+          中间由 .app-bar-locale 的左边框隔开。语言切换是全局设置、与登录状态
+          无关，未登录时也照常显示，所以它不能放进 v-if 里。
+        -->
+        <div class="app-bar-actions">
+          <div v-if="status === 'authenticated'" class="app-bar-account">
+            <span class="app-bar-user">{{ user.email || user.username }}</span>
+            <v-divider vertical class="app-bar-account-divider" aria-hidden="true" />
+            <!--
+              用户管理 / WSI 注册表 / 地图管理 / 修改密码都是"配置性质、偶尔进一次"
+              的动作，统一收进「管理」菜单，语义清楚，也不会随功能增加把顶栏挤爆。
+            -->
+            <v-menu>
+              <template #activator="{ props: menuProps }">
+                <v-btn
+                  v-bind="menuProps"
+                  class="app-bar-user"
+                  variant="tonal"
+                  prepend-icon="mdi-cog-outline"
+                  append-icon="mdi-menu-down"
+                >
+                  {{ t("nav.manage") }}
+                </v-btn>
+              </template>
+              <v-list density="compact">
+                <v-list-item prepend-icon="mdi-lock-reset" @click="passwordOpen = true">
+                  <v-list-item-title>{{ t("nav.changePassword") }}</v-list-item-title>
+                </v-list-item>
+                <v-list-item
+                  v-if="isStaff"
+                  prepend-icon="mdi-account-group-outline"
+                  @click="go('users')"
+                >
+                  <v-list-item-title>{{ t("nav.users") }}</v-list-item-title>
+                </v-list-item>
+                <v-list-item prepend-icon="mdi-shield-key-outline" @click="go('registry')">
+                  <v-list-item-title>{{ t("nav.wsiRegistry") }}</v-list-item-title>
+                </v-list-item>
+                <v-list-item prepend-icon="mdi-map-outline" @click="go('map')">
+                  <v-list-item-title>{{ t("nav.mapSettings") }}</v-list-item-title>
+                </v-list-item>
+              </v-list>
+            </v-menu>
+            <v-btn class="app-bar-user" variant="tonal" @click="handleLogout">{{ t("app.logout") }}</v-btn>
+          </div>
+          <div class="app-bar-locale">
+            <LocaleSwitcher />
+          </div>
+        </div>
       </template>
     </v-app-bar>
 
@@ -171,7 +182,7 @@ async function handleLogout() {
         <v-list-item
           v-for="item in NAV_ITEMS"
           :key="item.mode"
-          :title="item.title"
+          :title="t(item.titleKey)"
           :prepend-icon="item.icon"
           :active="activeNav === item.mode"
           color="primary"
@@ -272,6 +283,24 @@ async function handleLogout() {
 /* 顶栏右上角那几个元素（邮箱、语言切换、「管理」、「退出」）共用 .app-bar-user，
    具体配色在 app.css 里统一定义 —— 语言切换在子组件里，scoped 样式到不了，
    写在那边只能命中它的根元素，会出现"一颗白字、两颗深字"的错位。 */
+
+.app-bar-actions,
+.app-bar-account {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.app-bar-account-divider {
+  border-color: rgba(255, 255, 255, 0.6);
+  opacity: 1;
+  height: 28px;
+}
+
+.app-bar-locale {
+  border-left: 1px solid rgba(255, 255, 255, 0.6);
+  padding-left: 1rem;
+}
 
 .app-footer {
   background: url("./assets/img/wmo-foot.png") center / 100% 100% no-repeat;

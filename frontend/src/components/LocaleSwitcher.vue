@@ -19,11 +19,11 @@ const current = computed(() => locales.find((locale) => locale.code === selected
         v-bind="activator"
         class="locale-button app-bar-user"
         variant="tonal"
-        prepend-icon="mdi-translate"
+        prepend-icon="mdi-web"
         :aria-label="t('locale.switch')"
         :title="t('locale.switch')"
       >
-        {{ current?.label }}
+        <span class="d-none d-sm-inline">{{ current?.label }}</span>
       </v-btn>
     </template>
 
@@ -47,6 +47,7 @@ const current = computed(() => locales.find((locale) => locale.code === selected
 <style scoped>
 .locale-button {
   text-transform: none;
+  color: #fff;
 }
 
 .pending-tag {
