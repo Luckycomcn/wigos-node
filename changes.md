@@ -18,6 +18,8 @@ further changes are made.
 | `frontend/src/components/LocaleSwitcher.vue` | 17–26 | Uses a globe icon and hides the locale text at narrow viewport sizes; the accessible label remains. |
 | `frontend/src/components/LocaleSwitcher.vue` | 47–51 | The locale button joins the shared `app-bar-user` class so it is drawn like the buttons beside it. |
 | `frontend/src/app.css` | 123–142 | Colour, background, border and hover for the whole group of app bar buttons are defined once, globally. |
+| `frontend/src/components/StationsList.vue` | 90–120 | A Publishing column shows each station's latest publication status, so "the station record was saved" and "the change reached WIS2" are no longer the same thing on screen. Refreshed every 5 s while a record is pending or processing, and it stops when the status settles or the page is left. |
+| `frontend/src/components/StationsList.vue` | 214–221 | A station with no status the user may see gets no chip rather than a placeholder; if the statuses cannot be loaded at all, the list still renders. |
 
 The last two entries address the same defect from opposite ends. The locale
 button is rendered by `LocaleSwitcher`, and the scoped styles in `App.vue` could
@@ -31,6 +33,8 @@ light. Moving the appearance into `app.css` gives all of them one definition.
 |---|---:|---|
 | `frontend/src/i18n/locales/en.js` | 10–13 | Added English sidebar labels. |
 | `frontend/src/i18n/locales/zh-CN.js` | 9–12 | Added Chinese sidebar labels (`台站`, `发布`, `导入导出`). |
+| `frontend/src/i18n/locales/en.js` | 121 | Added the Publishing column heading. |
+| `frontend/src/i18n/locales/zh-CN.js` | 117 | Added the Publishing column heading (`发布`). |
 
 ### Backend
 
@@ -50,22 +54,28 @@ light. Moving the appearance into `app.css` gives all of them one definition.
 |---|---:|---|
 | `frontend/src/App.test.js` | 79–106 | Added coverage for the Import / export item, the Chinese sidebar labels, header grouping, and selector visibility before login. |
 | `frontend/src/App.test.js` | 48–52 | Resets the locale to English before each test. |
+| `frontend/src/components/StationsList.test.js` | 44–102 | Publishing status: the chip per station, the absent chip, the list surviving a failed status load, the refresh stopping once a status settles, and the watcher being cleared when the page is left. |
 | `frontend/src/icons.test.js` | 1–73 | Collects every `mdi-*` name from the source and checks it against the glyphs the icon font actually provides, ignoring names that only appear in comments. A missing name is invisible at build time, type-check time and to every other test — the item simply renders with an empty gap. |
 
 ## Validation status
 
-The frontend test suite passes: 12 files, 181 tests, plus a pre-existing
-`undici` load failure that affects 8 component tests and is unrelated to these
-changes (the same 8 fail on the untouched baseline). The icon test was checked
-against its own subject: injecting a missing name makes it fail, restoring the
-name makes it pass again.
+The frontend suite passes in full: 20 files, 247 tests. Running it needed Node
+22 — `undici` 8.12.1, pulled in by `jsdom` 30.1.2, needs it, and on Node 20 those
+eight files fail to load at all. They were reporting as "8 errors" alongside a
+green test count, which hid 19 real failures behind them; the count is now the
+whole suite.
+
+The icon test was checked against its own subject: injecting a missing name
+makes it fail, restoring the name makes it pass again.
 
 The production build was run with `--base=/feature/` and the output inspected:
-the Import / export icon is present, no unknown `mdi-*` name remains, and the
-shared app bar button rule is emitted as
-`.app-bar-user.v-btn{background:#ffffff29;border:1px solid #ffffff42}`.
+the Import / export icon is present, no unknown `mdi-*` name remains, the
+Publishing column and its chip text are in the bundle, and the shared app bar
+button rule is emitted as
+`.app-bar-user.v-btn{background:#ffffff29;border:1px solid rgba(255,255,255,.42)}`.
 
-The publishing endpoints were checked live: `GET /api/publications/` returns
-200 with a page of results, and the retry endpoint is routed.
+The API was checked live: `GET /api/publications/` returns 200 with a page of
+results, `GET /api/publications/latest/` returns 200 with the per-station map the
+column reads, and the retry endpoint is routed.
 
 Browser and device verification across viewport widths is still pending.
